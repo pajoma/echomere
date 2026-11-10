@@ -25,19 +25,19 @@ let noon = Date(timeIntervalSince1970: 1_794_000_000)
 let hour: TimeInterval = 3600
 let day: TimeInterval = 24 * hour
 
-func visitor(_ id: String, arrived: Date, colour: Int = 0) -> Visitor {
-    Visitor(creatureID: id, look: WhaleLook(colour: colour, pattern: 0, size: 1), arrivedAt: arrived)
+func visitor(_ id: String, arrived: Date, species: WhaleSpecies = .southernRightWhale) -> Visitor {
+    Visitor(creatureID: id, look: WhaleLook(species: species, size: 1), arrivedAt: arrived)
 }
 
 func echo(_ id: String, left: Date) -> Echo {
-    Echo(creatureID: id, look: WhaleLook(colour: 0, pattern: 0, size: 1), leftAt: left)
+    Echo(creatureID: id, look: WhaleLook(species: .southernRightWhale, size: 1), leftAt: left)
 }
 
 let munichBay = CoveScene(seed: CoveSeed(4_711))
 let guests = [
-    visitor("whale-a", arrived: noon - 5 * hour, colour: 1),
-    visitor("whale-b", arrived: noon - 2 * hour, colour: 3),
-    visitor("whale-c", arrived: noon - hour, colour: 5),
+    visitor("whale-a", arrived: noon - 5 * hour),
+    visitor("whale-b", arrived: noon - 2 * hour, species: .orca),
+    visitor("whale-c", arrived: noon - hour),
 ]
 let traces = [echo("whale-x", left: noon - day), echo("whale-y", left: noon - 3 * day)]
 
@@ -68,18 +68,41 @@ let crowded = munichBay.frame(at: noon, visitors: crowd, echoes: [])
 check("at most six whales are drawn: five visitors and a creator's new whale",
       crowded.whales.count == SceneRules.maxWhales)
 
-var visibleSamples = 0
-var samples = 0
-for step in stride(from: 0.0, to: day, by: 30) {
+var inView = 0, samples = 0, overhead = false
+var fastest = 0.0, shallowest = -100.0, deepest = 0.0
+var previous: WhalePose?
+for step in stride(from: 0.0, to: day, by: 20) {
+    guard let whale = munichBay.frame(at: noon + step, visitors: [guests[0]], echoes: []).whales.first else { continue }
     samples += 1
-    if let whale = munichBay.frame(at: noon + step, visitors: [guests[0]], echoes: []).whales.first,
-       whale.x > -0.2, whale.x < SceneRules.worldWidth + 0.2 {
-        visibleSamples += 1
+    if let seen = SceneCamera.project(whale.position, aspect: 1.6),
+       seen.x > -0.1, seen.x < 1.1, seen.y > -0.1, seen.y < 1.1, seen.distance < 110 {
+        inView += 1
     }
+    if hypot(whale.position.x, whale.position.z) < 15 { overhead = true }
+    shallowest = max(shallowest, whale.position.y)
+    deepest = min(deepest, whale.position.y)
+    if let previous {
+        let d = whale.position - previous.position
+        fastest = max(fastest, (d * d).sum().squareRoot() / 20)
+    }
+    previous = whale
 }
-let visibleShare = Double(visibleSamples) / Double(samples)
-check("a whale leaves the view now and then and comes back (in view \(Int(visibleShare * 100))% of the day)",
-      visibleShare > 0.4 && visibleShare < 0.85)
+let inViewShare = Double(inView) / Double(samples)
+check("a whale roams in and out of view (in view \(Int(inViewShare * 100))% of the day)",
+      inViewShare > 0.3 && inViewShare < 0.85)
+check("a whale passes over the camera at some point in the day", overhead)
+check("a whale stays between the seabed and the surface (\(Int(-shallowest)) to \(Int(-deepest)) m deep)",
+      shallowest < -3 && deepest > -SceneRules.cameraDepth + 2)
+check("a whale swims at a whale's pace (at most \(String(format: "%.1f", fastest)) m/s)", fastest < 2)
+let whaleNow = munichBay.frame(at: noon, visitors: guests, echoes: []).whales
+let whaleNext = munichBay.frame(at: noon + 1.0 / 15, visitors: guests, echoes: []).whales
+check("whales move smoothly from one frame to the next",
+      zip(whaleNow, whaleNext).allSatisfy { a, b in
+          let d = a.position - b.position
+          return a.id == b.id && (d * d).sum().squareRoot() < 0.2 && abs(a.roll - b.roll) < 0.05
+      })
+check("a visitor is the whale its creator chose",
+      whaleNow.first { $0.id == "whale-b" }?.species == .orca && whaleNow.first { $0.id == "whale-b" }?.length == 7)
 
 print("Echoes")
 check("an echo older than seven days is gone",
@@ -114,12 +137,12 @@ check("kelp sways the same on every screen",
       munichBay.frame(at: noon, visitors: [], echoes: []).kelpMotion
           == CoveScene(seed: CoveSeed(9)).frame(at: noon, visitors: [], echoes: []).kelpMotion)
 let frame = munichBay.frame(at: noon, visitors: guests, echoes: traces)
-check("creatures are drawn from far to near",
+check("small fish are drawn from far to near",
       zip(frame.creatures, frame.creatures.dropFirst()).allSatisfy { $0.depth >= $1.depth })
 let next = munichBay.frame(at: noon + 1.0 / 15, visitors: guests, echoes: traces)
 let nextByID = Dictionary(uniqueKeysWithValues: next.creatures.map { ($0.id, $0) })
 let largestStep = frame.creatures.compactMap { c in nextByID[c.id].map { hypot(c.x - $0.x, c.y - $0.y) } }.max() ?? 1
-check("creatures move smoothly from one frame to the next", largestStep < 0.01 && nextByID.count == frame.creatures.count)
+check("small fish move smoothly from one frame to the next", largestStep < 0.01 && nextByID.count == frame.creatures.count)
 check("the scene has ambient life", !frame.fish.isEmpty)
 
 print("The sea")

@@ -41,8 +41,8 @@ public enum SceneBuffer {
         for (i, c) in creatures.enumerated() {
             let b = creatureStart + i * 3
             data[b] = SIMD4(Float(c.x), Float(c.y), Float(c.depth), Float(c.facing))
-            data[b + 1] = SIMD4(Float(c.phase), Float(c.size), Float(c.opacity), Float(c.pattern))
-            data[b + 2] = SIMD4(Float(c.colour), c.kind == .whale ? 0 : 1, 0, 0)
+            data[b + 1] = SIMD4(Float(c.phase), Float(c.size), 1, 0)
+            data[b + 2] = SIMD4(Float(c.colour), 1, 0, 0)
         }
 
         let sky = frame.sky

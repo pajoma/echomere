@@ -6,21 +6,35 @@ public struct CoveSeed: Hashable, Sendable {
     public init(_ value: UInt64) { self.value = value }
 }
 
+/// The kinds of whale a creator can choose from.
+public enum WhaleSpecies: Int, CaseIterable, Hashable, Sendable {
+    case southernRightWhale
+    case orca
+
+    /// Length of an average adult, in metres.
+    public var length: Double {
+        switch self {
+        case .southernRightWhale: 14.5
+        case .orca: 7.0
+        }
+    }
+}
+
 /// How a whale looks, chosen by its creator from fixed options.
 public struct WhaleLook: Hashable, Sendable {
-    public static let colourCount = 6
-    public static let patternCount = 4
     public static let sizeRange = 0.8...1.2
 
-    public let colour: Int
-    public let pattern: Int
+    public let species: WhaleSpecies
+    /// Relative to an average adult of its species.
     public let size: Double
 
-    public init(colour: Int, pattern: Int, size: Double) {
-        self.colour = ((colour % Self.colourCount) + Self.colourCount) % Self.colourCount
-        self.pattern = ((pattern % Self.patternCount) + Self.patternCount) % Self.patternCount
+    public init(species: WhaleSpecies, size: Double) {
+        self.species = species
         self.size = min(max(size, Self.sizeRange.lowerBound), Self.sizeRange.upperBound)
     }
+
+    /// Length in metres.
+    public var length: Double { species.length * size }
 }
 
 /// A creature visiting the cove during its current stop.
@@ -63,4 +77,8 @@ public enum SceneRules {
     /// The camera stands on the seabed this far below the surface, in metres. Must match `CAMERA_DEPTH` in the
     /// shader.
     public static let cameraDepth = 30.0
+    /// The camera is tilted up by this angle (radians) and has this focal length, in picture heights. Must match
+    /// `PITCH` and `FOCAL` in the shader.
+    public static let cameraPitch = 0.262
+    public static let cameraFocal = 0.714
 }

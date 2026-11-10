@@ -30,6 +30,9 @@ public final class CoveSceneRenderer {
     private let backdropDepth: MTLDepthStencilState
     private let geometryDepth: MTLDepthStencilState
     private var depthTexture: MTLTexture?
+    // The whales: one model per species, drawn once per whale after the kelp.
+    private let whalePipeline: MTLRenderPipelineState
+    private let whaleModels: [WhaleSpecies: WhaleModel]
     /// Draws the sea from above instead of the scene, for checking the waves against footage of a real sea.
     public var showsSeaFromAbove = false
 
@@ -68,6 +71,29 @@ public final class CoveSceneRenderer {
         layout.layouts[0].stride = MemoryLayout<SIMD4<Float>>.stride
         kelp.vertexDescriptor = layout
         kelpPipeline = try device.makeRenderPipelineState(descriptor: kelp)
+
+        guard let whaleVertex = library.makeFunction(name: "whale_vertex") else {
+            throw CoveSceneRendererError.missingShader("whale_vertex")
+        }
+        guard let whaleFragment = library.makeFunction(name: "whale_fragment") else {
+            throw CoveSceneRendererError.missingShader("whale_fragment")
+        }
+        let whale = MTLRenderPipelineDescriptor()
+        whale.vertexFunction = whaleVertex
+        whale.fragmentFunction = whaleFragment
+        whale.colorAttachments[0].pixelFormat = pixelFormat
+        // A whale fades in when it arrives.
+        whale.colorAttachments[0].isBlendingEnabled = true
+        whale.colorAttachments[0].sourceRGBBlendFactor = .sourceAlpha
+        whale.colorAttachments[0].destinationRGBBlendFactor = .oneMinusSourceAlpha
+        whale.depthAttachmentPixelFormat = .depth32Float
+        whale.vertexDescriptor = WhaleModel.vertexDescriptor
+        whalePipeline = try device.makeRenderPipelineState(descriptor: whale)
+        var models: [WhaleSpecies: WhaleModel] = [:]
+        for species in WhaleSpecies.allCases {
+            models[species] = try WhaleModel(species: species, device: device)
+        }
+        whaleModels = models
 
         let mesh = KelpMesh.build()
         guard let vertices = mesh.vertices.withUnsafeBytes({ device.makeBuffer(bytes: $0.baseAddress!, length: $0.count) }),
@@ -199,6 +225,32 @@ public final class CoveSceneRenderer {
             encoder.drawIndexedPrimitives(
                 type: .triangle, indexCount: kelpIndexCount, indexType: .uint16, indexBuffer: kelpIndices,
                 indexBufferOffset: 0, instanceCount: frame.kelp.count)
+        }
+
+        if !showsSeaFromAbove {
+            encoder.setRenderPipelineState(whalePipeline)
+            encoder.setDepthStencilState(geometryDepth)
+            encoder.setCullMode(.none)
+            encoder.setFragmentTexture(ocean.curvature, index: 1)
+            let stride = MemoryLayout<SIMD4<Float>>.stride
+            for whale in frame.whales where whale.opacity > 0 {
+                guard let model = whaleModels[whale.species] else { continue }
+                var data: [SIMD4<Float>] = [
+                    SIMD4(SIMD3<Float>(whale.position), Float(whale.length)),
+                    SIMD4(SIMD3<Float>(whale.forward), Float(whale.roll)),
+                    SIMD4(Float(whale.tailPhase), Float(whale.opacity), 0, 0),
+                    SIMD4(Float(texture.width) / Float(texture.height), 1 / Float(texture.height), 0, 0),
+                    SIMD4(SIMD3<Float>(frame.sky.lightDirection), Float(frame.sky.lightIntensity)),
+                    SIMD4(SIMD3<Float>(frame.sky.lightColour), Float(frame.sky.ambient)),
+                ]
+                encoder.setVertexBuffer(model.vertices, offset: 0, index: 0)
+                encoder.setVertexBytes(&data, length: stride * data.count, index: 1)
+                encoder.setFragmentBytes(&data, length: stride * data.count, index: 1)
+                encoder.setFragmentTexture(model.skin, index: 0)
+                encoder.drawIndexedPrimitives(
+                    type: .triangle, indexCount: model.indexCount, indexType: .uint32, indexBuffer: model.indices,
+                    indexBufferOffset: 0)
+            }
         }
         encoder.endEncoding()
     }

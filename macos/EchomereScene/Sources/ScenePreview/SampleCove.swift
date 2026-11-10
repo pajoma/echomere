@@ -7,9 +7,9 @@ enum SampleCove {
         (0..<count).map { i in
             Visitor(
                 creatureID: "sample-\(seed)-\(i)",
-                look: WhaleLook(colour: Int(seed % 6) + i * 2, pattern: i, size: 0.85 + 0.12 * Double(i % 3)),
+                look: WhaleLook(species: i % 3 == 1 ? .orca : .southernRightWhale, size: 0.85 + 0.12 * Double(i % 3)),
                 // The last one arrives a moment after start, to show the fade-in.
-                arrivedAt: i == count - 1 ? now.addingTimeInterval(5) : now.addingTimeInterval(-3600 * Double(i + 1)))
+                arrivedAt: i == count - 1 && count > 1 ? now.addingTimeInterval(5) : now.addingTimeInterval(-3600 * Double(i + 1)))
         }
     }
 
@@ -17,7 +17,7 @@ enum SampleCove {
         (0..<count).map { i in
             Echo(
                 creatureID: "echo-\(seed)-\(i)",
-                look: WhaleLook(colour: i, pattern: 0, size: 1),
+                look: WhaleLook(species: .southernRightWhale, size: 1),
                 leftAt: now.addingTimeInterval(-86_400 * (Double(i) + 0.3)))
         }
     }

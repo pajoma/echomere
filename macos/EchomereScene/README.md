@@ -14,6 +14,9 @@ The cove scene for macOS (issue #7): what every screen in a cove shows, drawn na
 - **ScenePreview**: a window for looking at the scene, and a snapshot tool.
 - **SceneChecks**: behaviour checks at the scene seam.
 
+The whale models in `Sources/CoveSceneRenderer/Resources/Whales/` have their own licence (CC BY-NC 4.0, see the
+`LICENSE.md` there); they are made from the original downloads with `tools/prepare-whales.py`.
+
 The screensaver shell (#9) and the creator's overlay (#8) build on these modules.
 
 ## Use
@@ -30,7 +33,7 @@ swift run ScenePreview --hour 21             # the sky at 21 o'clock: the moon i
 swift run ScenePreview --day-seconds 72      # a whole day in 72 seconds, starting at --hour (default 5)
 ```
 
-Other options: `--seed N`, `--whales N` (up to 6), `--echoes N`, `--fps N` (default 15), `--scale X`
+Other options: `--seed N`, `--whales N` (up to 6; right whales and orcas), `--echoes N`, `--fps N` (default 15), `--scale X`
 (render resolution relative to the screen, default 0.5).
 
 ## Energy

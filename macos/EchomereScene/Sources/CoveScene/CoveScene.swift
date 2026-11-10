@@ -1,23 +1,36 @@
 import Foundation
 
+/// One of the small fish of the ambient life, in picture coordinates.
 public struct CreaturePose: Equatable, Sendable {
-    public enum Kind: Equatable, Sendable { case whale, fish }
-
-    public let kind: Kind
-    /// The creature ID for whales; a stable name such as "fish-1-4" for ambient life.
+    /// A stable name such as "fish-1-4".
     public let id: String
     public let x: Double
     public let y: Double
     /// 0 is near the camera, 1 is far away.
     public let depth: Double
-    /// -1 swims left, +1 swims right; values in between are a whale or fish turning.
+    /// -1 swims left, +1 swims right; values in between are a fish turning.
     public let facing: Double
     /// Tail beat, 0..<2π.
     public let phase: Double
     public let size: Double
-    public let opacity: Double
     public let colour: Int
-    public let pattern: Int
+}
+
+/// A whale in the water, in metres: x to the right of the camera, y up (0 is the surface), z ahead of it.
+public struct WhalePose: Equatable, Sendable {
+    /// The creature ID.
+    public let id: String
+    public let species: WhaleSpecies
+    public let position: SIMD3<Double>
+    /// The way the whale swims (a unit vector).
+    public let forward: SIMD3<Double>
+    /// How far it banks into a turn, in radians.
+    public let roll: Double
+    /// Tail beat, 0..<2π.
+    public let tailPhase: Double
+    /// Length in metres.
+    public let length: Double
+    public let opacity: Double
 }
 
 public struct EchoPose: Equatable, Sendable {
@@ -35,7 +48,9 @@ public struct EchoPose: Equatable, Sendable {
 public struct SceneFrame: Equatable, Sendable {
     public let time: Date
     public let terrain: [TerrainLayer]
-    /// Whales and fish, ordered from far to near.
+    /// The whales visiting the cove.
+    public let whales: [WhalePose]
+    /// The small fish of the ambient life, ordered from far to near.
     public let creatures: [CreaturePose]
     public let kelp: [KelpFrond]
     public let kelpMotion: KelpMotion
@@ -45,8 +60,7 @@ public struct SceneFrame: Equatable, Sendable {
     /// The sky above the cove. It can be replaced to look at another time of day.
     public var sky: SkyState
 
-    public var whales: [CreaturePose] { creatures.filter { $0.kind == .whale } }
-    public var fish: [CreaturePose] { creatures.filter { $0.kind == .fish } }
+    public var fish: [CreaturePose] { creatures }
 }
 
 /// A cove's scene. Every screen in the cove computes the same frame from the same seed, visitors, echoes and
@@ -71,7 +85,7 @@ public struct CoveScene: Equatable, Sendable {
 
         let fish = layout.schools.enumerated().flatMap { fishPoses(for: $1, schoolIndex: $0, at: t) }
 
-        let creatures = (whales + fish).sorted { ($0.depth, $0.id) > ($1.depth, $1.id) }
+        let creatures = fish.sorted { ($0.depth, $0.id) > ($1.depth, $1.id) }
 
         let recentEchoes = echoes
             .filter { $0.leftAt <= time && time.timeIntervalSince($0.leftAt) < SceneRules.echoLifetime }
@@ -80,64 +94,78 @@ public struct CoveScene: Equatable, Sendable {
             .map { echoPose(for: $0, at: t) }
 
         return SceneFrame(
-            time: time, terrain: layout.terrain, creatures: creatures, kelp: layout.kelp,
+            time: time, terrain: layout.terrain, whales: whales, creatures: creatures, kelp: layout.kelp,
             kelpMotion: Kelp.motion(at: time), echoes: Array(recentEchoes),
             seaTime: Sea.time(at: time), sky: Sky.state(at: time))
     }
 
     // MARK: - Whales
 
-    /// A whale swims a slow, endless loop through the cove, unique to this cove and this whale. It leaves the
-    /// view now and then and comes back.
+    /// A whale roams the cove on a slow, endless path, unique to this cove and this whale. It swims at about
+    /// walking pace between the seabed and the surface, passes in front of the camera and over it, and leaves
+    /// the view now and then.
     struct WhalePath {
         let amplitudeX, periodX, phaseX: Double
+        let centreZ, amplitudeZ, periodZ, phaseZ: Double
         let centreY, amplitudeY, periodY, phaseY: Double
-        let depthMid, depthAmplitude, periodDepth, phaseDepth: Double
         let tailPeriod, tailPhase: Double
 
         init(cove: CoveSeed, creatureID: String) {
             var random = SplitMix64(seed: combine(cove.value, stableHash(creatureID)))
-            amplitudeX = random.range(1.05, 1.3)
-            periodX = random.range(420, 780)
+            amplitudeX = random.range(26, 40)
+            periodX = random.range(330, 500)
             phaseX = random.angle()
-            centreY = random.range(0.42, 0.68)
-            amplitudeY = random.range(0.06, 0.14)
-            periodY = random.range(150, 300)
+            centreZ = random.range(22, 30)
+            amplitudeZ = random.range(20, 27)
+            periodZ = random.range(270, 410)
+            phaseZ = random.angle()
+            centreY = random.range(-17, -13)
+            amplitudeY = random.range(5, 8)
+            periodY = random.range(240, 420)
             phaseY = random.angle()
-            depthMid = random.range(0.35, 0.65)
-            depthAmplitude = random.range(0.1, 0.2)
-            periodDepth = random.range(200, 400)
-            phaseDepth = random.angle()
-            tailPeriod = random.range(5, 8)
+            tailPeriod = random.range(4.5, 6.5)
             tailPhase = random.angle()
         }
 
-        func position(at t: Double) -> (x: Double, y: Double, depth: Double, velocityX: Double) {
-            let ax = cycle(t, periodX) + phaseX
-            return (
-                SceneRules.worldCentreX + amplitudeX * sin(ax),
-                centreY + amplitudeY * sin(cycle(t, periodY) + phaseY),
-                depthMid + depthAmplitude * sin(cycle(t, periodDepth) + phaseDepth),
-                amplitudeX * (2 * .pi / periodX) * cos(ax))
+        struct State {
+            let position: SIMD3<Double>
+            let velocity: SIMD3<Double>
+            let acceleration: SIMD3<Double>
+        }
+
+        func state(at t: Double) -> State {
+            func wave(_ centre: Double, _ amplitude: Double, _ period: Double, _ phase: Double)
+                -> (Double, Double, Double) {
+                let omega = 2 * Double.pi / period
+                let angle = cycle(t, period) + phase
+                return (centre + amplitude * sin(angle), amplitude * omega * cos(angle),
+                        -amplitude * omega * omega * sin(angle))
+            }
+            let x = wave(0, amplitudeX, periodX, phaseX)
+            let y = wave(centreY, amplitudeY, periodY, phaseY)
+            let z = wave(centreZ, amplitudeZ, periodZ, phaseZ)
+            return State(position: SIMD3(x.0, y.0, z.0), velocity: SIMD3(x.1, y.1, z.1),
+                         acceleration: SIMD3(x.2, y.2, z.2))
         }
     }
 
-    func whalePose(for visitor: Visitor, at t: Double) -> CreaturePose {
+    func whalePose(for visitor: Visitor, at t: Double) -> WhalePose {
         let path = WhalePath(cove: seed, creatureID: visitor.creatureID)
-        let position = path.position(at: t)
+        let state = path.state(at: t)
+        let v = state.velocity, a = state.acceleration
+        let speed = max((v * v).sum().squareRoot(), 1e-6)
+        // The whale banks into its turns: the faster it turns, the further it leans.
+        let turnRate = (v.z * a.x - v.x * a.z) / max(v.x * v.x + v.z * v.z, 1e-6)
         let sinceArrival = t - visitor.arrivedAt.timeIntervalSince1970
-        return CreaturePose(
-            kind: .whale,
+        return WhalePose(
             id: visitor.creatureID,
-            x: position.x,
-            y: position.y,
-            depth: position.depth,
-            facing: tanh(position.velocityX / 0.004),
-            phase: wrapAngle(cycle(t, path.tailPeriod) + path.tailPhase),
-            size: visitor.look.size,
-            opacity: min(1, max(0, sinceArrival / SceneRules.whaleFadeIn)),
-            colour: visitor.look.colour,
-            pattern: visitor.look.pattern)
+            species: visitor.look.species,
+            position: state.position,
+            forward: v / speed,
+            roll: min(max(turnRate * 8, -0.35), 0.35),
+            tailPhase: wrapAngle(cycle(t, path.tailPeriod) + path.tailPhase),
+            length: visitor.look.length,
+            opacity: min(1, max(0, sinceArrival / SceneRules.whaleFadeIn)))
     }
 
     // MARK: - Ambient life
@@ -150,7 +178,6 @@ public struct CoveScene: Equatable, Sendable {
         let facing = tanh(velocityX / 0.002)
         return school.members.enumerated().map { index, member in
             CreaturePose(
-                kind: .fish,
                 id: "fish-\(schoolIndex)-\(index)",
                 x: centreX + member.offsetX + 0.008 * sin(t * 0.6 + member.wobblePhase),
                 y: centreY + member.offsetY + 0.006 * sin(t * 0.9 + member.wobblePhase * 1.3),
@@ -158,9 +185,7 @@ public struct CoveScene: Equatable, Sendable {
                 facing: facing,
                 phase: wrapAngle(t * 2 * .pi * 1.6 + member.wobblePhase),
                 size: school.size * member.size,
-                opacity: 1,
-                colour: school.tint,
-                pattern: 0)
+                colour: school.tint)
         }
     }
 
@@ -168,8 +193,13 @@ public struct CoveScene: Equatable, Sendable {
 
     func echoPose(for echo: Echo, at t: Double) -> EchoPose {
         let left = echo.leftAt.timeIntervalSince1970
-        // The echo stays where the whale swam in this cove when it left.
-        let position = WhalePath(cove: seed, creatureID: echo.creatureID).position(at: left)
+        // The echo stays where the whale swam in this cove when it left, as the camera saw it.
+        let place = WhalePath(cove: seed, creatureID: echo.creatureID).state(at: left).position
+        let seen = SceneCamera.project(place, aspect: SceneRules.worldWidth)
+        let position = (
+            x: SceneRules.worldCentreX + ((seen?.x ?? 0.5) - 0.5) * SceneRules.worldWidth,
+            y: min(max(seen?.y ?? 0.5, 0.15), 0.85),
+            depth: min(max((seen?.distance ?? 40) / 90, 0.1), 0.9))
         var random = SplitMix64(seed: combine(seed.value ^ 0xEC40, stableHash(echo.creatureID)))
         let callPeriod = random.range(900, 2400)
         let callOffset = random.range(0, callPeriod)
@@ -195,4 +225,20 @@ func cycle(_ t: Double, _ period: Double) -> Double {
 func wrapAngle(_ angle: Double) -> Double {
     let wrapped = angle.truncatingRemainder(dividingBy: 2 * .pi)
     return wrapped < 0 ? wrapped + 2 * .pi : wrapped
+}
+
+
+/// The camera on the seabed, for working out where something in the water appears in the picture.
+public enum SceneCamera {
+    /// Where a point in the water (metres) appears: x and y run 0...1 across and up the picture (outside that
+    /// range the point is out of view), with its distance from the camera. Nil if it is behind the camera.
+    public static func project(_ point: SIMD3<Double>, aspect: Double) -> (x: Double, y: Double, distance: Double)? {
+        let d = point - SIMD3(0, -SceneRules.cameraDepth, 0)
+        let cp = cos(SceneRules.cameraPitch), sp = sin(SceneRules.cameraPitch)
+        let up = d.y * cp - d.z * sp
+        let ahead = d.y * sp + d.z * cp
+        guard ahead > 0.3 else { return nil }
+        let f = SceneRules.cameraFocal
+        return (0.5 + f * d.x / ahead / aspect, 0.5 + f * up / ahead, (d * d).sum().squareRoot())
+    }
 }

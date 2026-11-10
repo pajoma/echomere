@@ -1,9 +1,9 @@
 /// Metal source for the cove scene, compiled at runtime so the package builds without Xcode.
 ///
 /// The sea is simulated first (an FFT ocean, see `OceanShaders`); then `scene_fragment` draws the picture
-/// back to front: the water and the surface seen from below, echoes, whales and fish, marine snow, and
+/// back to front: the water and the surface seen from below, echoes, small fish, marine snow, and
 /// the light shafts. The surface and the shafts come from the same wave field, so the light moves with the
-/// waves. The kelp is drawn on top as 3D geometry (`kelp_vertex`, `kelp_fragment`).
+/// waves. The kelp and the whales are drawn on top as 3D geometry (`kelp_*`, `whale_*`).
 ///
 ///
 /// The optics (refraction through the wave normal, Snell's window, total internal reflection, and caustics
@@ -19,15 +19,6 @@ enum SceneShaders {
     constant int TERRAIN = 2;
     constant int CREATURES = 14;
     constant int ECHOES = 326;
-
-    constant float3 WHALE_COLOURS[6] = {
-        float3(0.20, 0.25, 0.30),  // slate
-        float3(0.11, 0.12, 0.14),  // charcoal
-        float3(0.25, 0.22, 0.19),  // grey-brown
-        float3(0.40, 0.42, 0.43),  // pale grey
-        float3(0.07, 0.10, 0.15),  // blue-black
-        float3(0.20, 0.25, 0.23)   // grey-green
-    };
 
     struct VOut { float4 position [[position]]; float2 uv; };
 
@@ -309,61 +300,6 @@ enum SceneShaders {
         return mix(c * (0.2 + 0.8 * min(ambient, 1.2)), water(y, ambient), saturate(0.12 + 0.78 * depth));
     }
 
-    float4 drawWhale(float2 p, float4 a, float4 b, float4 c, float px, float ambient) {
-        float scale = 0.30 * b.y * (1.15 - 0.65 * a.z);
-        float2 q = (p - a.xy) / scale;
-        if (abs(q.x) > 0.75 || abs(q.y) > 0.35) return float4(0.0);
-        q.x /= sign(a.w + 1e-4) * max(abs(a.w), 0.18);
-        float aa = px / scale * 1.2;
-
-        float u = q.x + 0.5;                       // 0 at the tail stock, 1 at the snout
-        float beat = sin(b.x);
-        float spine = beat * 0.06 * pow(saturate(1.0 - u), 2.4);
-        float girth = pow(saturate(sin(3.14159 * pow(saturate(u), 1.25))), 0.6);
-        float thickTop = 0.018 * (1.0 - u) + 0.115 * girth
-                       + 0.022 * exp(-pow((u - 0.30) / 0.035, 2.0));      // small dorsal fin
-        float thickBottom = 0.016 * (1.0 - u) + 0.105 * girth;
-        float dy = q.y - spine;
-        float dBody = max(max(dy - thickTop, -dy - thickBottom), max(-u - 0.01, u - 1.0));
-
-        float2 fq = rotate(q - float2(-0.54, beat * 0.06), beat * 0.4);
-        float dFluke = (length(fq / float2(0.10, 0.018)) - 1.0) * 0.018;
-
-        float2 pq = rotate(q - float2(0.16, spine - 0.085), 0.75 + 0.06 * sin(b.x * 0.5));
-        float dFin = (length(pq / float2(0.14, 0.02)) - 1.0) * 0.02;
-
-        float dist = min(dBody, min(dFluke, dFin));
-        float alpha = smoothstep(aa, -aa, dist) * b.z;
-        if (alpha <= 0.001) return float4(0.0);
-
-        float3 base = WHALE_COLOURS[clamp(int(c.x), 0, 5)];
-        float side = saturate(dy / max(dy > 0.0 ? thickTop : thickBottom, 0.012) * 0.5 + 0.5); // 0 belly, 1 back
-        float3 col = mix(base * 1.6 + 0.02, base * 0.8, smoothstep(0.2, 0.6, side));
-
-        int pattern = int(b.w);
-        if (pattern == 1) {            // mottled
-            float2 g = q * float2(26.0, 34.0);
-            float2 cell = floor(g);
-            float h = hash21(cell);
-            float2 jitter = float2(hash21(cell + 1.7), hash21(cell + 9.2)) - 0.5;
-            float radius = 0.12 + 0.18 * hash21(cell + 4.4);
-            float spot = smoothstep(radius, radius - 0.08, length(fract(g) - 0.5 - jitter * 0.5));
-            col = mix(col, col * 1.45 + 0.02, spot * step(0.62, h) * 0.55);
-        } else if (pattern == 2) {     // scars
-            float l = abs(fract((q.x + q.y * 2.2) * 9.0 + hash21(floor(q * 6.0)) * 0.5) - 0.5);
-            col = mix(col, col * 1.6 + 0.03,
-                      smoothstep(0.04, 0.0, l) * 0.5 * step(0.62, hash21(floor(q * 5.0))) * step(0.3, u));
-        } else if (pattern == 3) {     // pale belly
-            col = mix(col, float3(0.50, 0.52, 0.51), (1.0 - smoothstep(0.15, 0.45, side)) * 0.7);
-        }
-
-        col += float3(0.05, 0.10, 0.11) * smoothstep(0.8, 1.0, side) * 0.6;   // light from above
-        col *= mix(1.0, 0.25, smoothstep(0.014, 0.007, length(q - float2(0.80, spine - 0.01))));  // eye
-        float mouth = abs(q.y - (spine - 0.035 - 0.05 * (1.0 - u))) ;
-        col *= mix(1.0, 0.6, smoothstep(0.006, 0.0, mouth) * smoothstep(0.62, 0.72, u) * step(u, 0.99)); // mouth line
-        return float4(fogged(col, a.z, a.y, ambient), alpha);
-    }
-
     float4 drawFish(float2 p, float4 a, float4 b, float4 c, float px, float ambient) {
         float scale = 0.024 * b.y * (1.15 - 0.6 * a.z);
         float2 q = (p - a.xy) / scale;
@@ -428,8 +364,7 @@ enum SceneShaders {
         for (int i = 0; i < creatureCount; i++) {
             int b = CREATURES + i * 3;
             float4 c = d[b + 2];
-            float4 s = c.y < 0.5 ? drawWhale(p, d[b], d[b + 1], c, px, sky.ambient)
-                                 : drawFish(p, d[b], d[b + 1], c, px, sky.ambient);
+            float4 s = drawFish(p, d[b], d[b + 1], c, px, sky.ambient);
             col = mix(col, s.rgb, s.a);
         }
 
@@ -603,6 +538,85 @@ enum SceneShaders {
         float2 v = float2(in.position.x * u[1].x / u[0].x - 0.5, y - 0.5) * float2(1.0, 0.8);
         c *= 1.0 - 0.35 * dot(v, v);
         return float4(saturate(c), 1.0);
+    }
+
+    // MARK: Whales
+
+    // A whale model (see tools/prepare-whales.py): x runs from the flukes (-0.5) to the snout (+0.5), y is up.
+    // The shader swims it: a wave travels down the body and grows towards the flukes.
+
+    struct WhaleIn {
+        float3 position [[attribute(0)]];
+        float3 normal [[attribute(1)]];
+        float2 uv [[attribute(2)]];
+    };
+    struct WhaleOut {
+        float4 position [[position]];
+        float3 world;
+        float3 normal;
+        float2 uv;
+    };
+
+    constexpr sampler skinSampler(address::repeat, filter::linear, mip_filter::linear);
+
+    // w[0] position, length · w[1] forward, roll · w[2] tail phase, opacity · w[3] aspect, 1 / picture height
+    // w[4] light direction, intensity · w[5] light colour, ambient
+    vertex WhaleOut whale_vertex(WhaleIn in [[stage_in]], constant float4 *w [[buffer(1)]]) {
+        float3 p = in.position;
+        float3 n = in.normal;
+        float along = saturate(0.5 - p.x);                 // 0 at the snout, 1 at the flukes
+        float amplitude = 0.006 + 0.075 * pow(along, 2.3);
+        float wave = w[2].x - 3.4 * along;
+        p.y += amplitude * sin(wave);
+        // The body tilts with the wave, and so do its normals.
+        float slope = -(0.075 * 2.3 * pow(along, 1.3) * sin(wave) - 3.4 * amplitude * cos(wave));
+        n = normalize(float3(n.x - slope * n.y, n.y + slope * n.x, n.z));
+
+        float3 forward = normalize(w[1].xyz);
+        float3 right = normalize(cross(forward, float3(0.0, 1.0, 0.0)));
+        float3 up = cross(right, forward);
+        float c = cos(w[1].w), s = sin(w[1].w);
+        float3 rolledUp = up * c + right * s;
+        float3 rolledRight = right * c - up * s;
+
+        WhaleOut out;
+        out.world = w[0].xyz + (forward * p.x + rolledUp * p.y + rolledRight * p.z) * w[0].w;
+        out.normal = forward * n.x + rolledUp * n.y + rolledRight * n.z;
+        out.uv = in.uv;
+        out.position = project(out.world, w[3].x);
+        return out;
+    }
+
+    fragment float4 whale_fragment(WhaleOut in [[stage_in]], constant float4 *w [[buffer(1)]],
+                                   texture2d<float> skin [[texture(0)]],
+                                   texture2d_array<float> curvature [[texture(1)]]) {
+        float3 camera = float3(0.0, -CAMERA_DEPTH, 0.0);
+        float3 toCamera = camera - in.world;
+        float distance = length(toCamera);
+        float3 normal = normalize(in.normal);
+        if (dot(normal, toCamera) < 0.0) normal = -normal;
+        float3 light = normalize(w[4].xyz);
+        float3 sun = sunInWater(light);
+        float depth = max(-in.world.y, 0.0);
+        float ambient = w[5].w;
+        float sunlight = exp(-depth * 0.045) * w[4].w;
+
+        // Sunlight focused by the waves dapples the whale's back.
+        SeaTextures sea = { curvature, curvature, curvature };
+        float dapple = mix(1.0, causticAt(sea, light, in.world.xz, depth, false), smoothstep(0.0, 0.7, normal.y));
+
+        float3 albedo = skin.sample(skinSampler, in.uv).rgb;
+        float above = normal.y * 0.5 + 0.5;
+        float3 c = albedo * (float3(0.50, 0.75, 1.00) * ambient * (0.35 + 1.05 * above)
+                             + w[5].rgb * sunlight * saturate(dot(normal, sun)) * 2.2 * dapple);
+
+        // The water between the whale and the camera.
+        float y = 1.0 - in.position.y * w[3].y;
+        float3 clear = exp(-distance * float3(0.034, 0.021, 0.017));
+        c = c * clear + water(y, ambient) * 0.8 * (1.0 - clear);
+        float2 v = float2(in.position.x * w[3].y / w[3].x - 0.5, y - 0.5) * float2(1.0, 0.8);
+        c *= 1.0 - 0.35 * dot(v, v);
+        return float4(saturate(c), w[2].y);
     }
     """
 }

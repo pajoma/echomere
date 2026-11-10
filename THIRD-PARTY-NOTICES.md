@@ -2,6 +2,12 @@
 
 Echomere's code is under the MIT licence (see `LICENSE`). Parts of it are based on the work below.
 
+## Whale models (not MIT)
+
+The whale models in `macos/EchomereScene/Sources/CoveSceneRenderer/Resources/Whales/` are adapted from
+"Model 55A - Southern Right Whale" by DigitalLife3D and "Female Orca" by neurodolphin, both under
+CC BY-NC 4.0. See the `LICENSE.md` in that folder for sources, credits and the changes made.
+
 ## web-ocean, Maksymilian Dendura
 
 The sea simulation in `macos/EchomereScene/Sources/CoveSceneRenderer/OceanShaders.swift` (the Tessendorf FFT
