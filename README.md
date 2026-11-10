@@ -4,13 +4,7 @@ A meditative deep-sea screensaver where anonymous creatures travel from cove to 
 
 ---
 
-*You step away from your desk, and the screen goes quiet and blue.*
-
-*Light ripples down from a surface far above. Kelp sways. Small fish drift past. Somewhere in the dim water, a whale you have never seen glides through your cove. It came from a town you may never visit, sent by someone you will never meet. It stays a day, and then it moves on.*
-
-*Somewhere else, your own whale is swimming too. You let it go on the first day, and it has been travelling ever since, from cove to cove, across seas it takes days to cross. Now and then a quiet line tells you where it is: near Porto, day 43. Now and then bubbles rise on your screen, and the name of a faraway bay fades in and out: someone there watched your whale for a while and wanted you to know.*
-
-*No names, no messages, no likes to count. Only the slow passing of whales, and the faint echoes they leave behind.*
+*Light ripples down from a surface far above. Kelp sways. Small fish drift past. Somewhere in the dim water, a whale you have never seen glides through your cove. It came from a place you may never visit, sent by someone you will never meet. It stays a day, and then it moves on.*
 
 ---
 
