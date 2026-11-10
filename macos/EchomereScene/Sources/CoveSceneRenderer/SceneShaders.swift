@@ -282,7 +282,7 @@ enum SceneShaders {
         float reach = mix(0.12, 1.0, smoothstep(0.08, HORIZON + 0.22, y));
         // The light is warm just under the surface and turns blue on its way down.
         float3 tint = mix(float3(0.030, 0.085, 0.180), float3(0.170, 0.115, 0.060), smoothstep(HORIZON, 1.0, y));
-        return tint * 0.19 * max(light, 0.0) * min(phase, 6.0) * reach;
+        return tint * 0.09 * max(light, 0.0) * min(phase, 6.0) * reach;
     }
 
     float3 fogged(float3 c, float depth, float y) {
