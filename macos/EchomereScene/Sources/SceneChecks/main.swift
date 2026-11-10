@@ -101,11 +101,13 @@ check("an echo calls now and then, not all the time (\(calls) s of calling in tw
 print("The scene itself")
 check("kelp is rooted below the view and reaches the surface",
       !munichBay.layout.kelp.isEmpty && munichBay.layout.kelp.allSatisfy {
-          $0.baseDepth > SceneRules.cameraDepth && $0.length > $0.baseDepth && $0.baseZ > 5
+          $0.baseDepth > SceneRules.cameraDepth && $0.length > $0.baseDepth
       })
 let sway = Kelp.motion(at: noon), swayLater = Kelp.motion(at: noon + Kelp.surgePeriod / 4)
 var quarter = swayLater.surge - sway.surge
 if quarter < 0 { quarter += 2 * .pi }
+check("kelp stays in the background, at least 25 m from the camera",
+      munichBay.layout.kelp.allSatisfy { $0.baseZ > 25 })
 check("kelp sways with the swell (one sway every \(String(format: "%.1f", Kelp.surgePeriod)) s)",
       abs(quarter - .pi / 2) < 1e-6 && Kelp.surgePeriod > 8 && Kelp.surgePeriod < 10)
 check("kelp sways the same on every screen",
