@@ -53,20 +53,22 @@ enum SceneShaders {
 
     // MARK: Camera and sea
 
-    // The camera stands on the seabed, about 12 m down, and is tilted 25 degrees up, like a webcam on the
-    // ground. It is a real perspective camera (60 degree vertical field of view): the horizon lies near the
-    // bottom edge, and Snell's window, where the sky shows through, fills the top of the picture.
+    // The camera stands on the seabed, about 12 m down, and is tilted 15 degrees up, like a webcam on the
+    // ground. It is a real perspective camera with a wide lens (70 degree vertical field of view): the lower
+    // third of the picture looks into the deep, and Snell's window, where the sky shows through, lies along
+    // the top.
     constant float CAMERA_DEPTH = 12.0;
-    constant float FOCAL = 0.866;
-    constant float PITCH = 0.436;
-    constant float HORIZON = 0.096;            // 0.5 - FOCAL * tan(PITCH)
+    constant float FOCAL = 0.714;
+    constant float PITCH = 0.262;
+    constant float HORIZON = 0.309;            // 0.5 - FOCAL * tan(PITCH)
     // Sea.cascadeSizes: long swell, wind sea, ripples.
     constant float CASCADE_SIZES[3] = { 211.3, 39.7, 7.43 };
     constant float WATER_IOR = 1.333;
     constant float MAX_WAVE = 3.0;             // no wave rises or dips further than this, in metres
 
-    // The sun stands 35 degrees high, ahead of the camera.
-    constant float3 SUN_IN_AIR = float3(0.10, 0.574, 0.813);
+    // A warm, low sun, 22 degrees high, ahead of the camera.
+    constant float3 SUN_IN_AIR = float3(0.10, 0.375, 0.922);
+    constant float3 SUN_COLOUR = float3(1.00, 0.66, 0.30);
 
     struct SeaTextures {
         texture2d_array<float> displacement;   // per cascade: (Dx, height, Dz, dDx/dz)
@@ -102,8 +104,8 @@ enum SceneShaders {
         float3 deep = float3(0.002, 0.015, 0.055);
         float3 middle = float3(0.010, 0.075, 0.210);
         float3 high = float3(0.030, 0.170, 0.400);
-        float3 c = mix(deep, middle, smoothstep(0.0, 0.30, y));
-        return mix(c, high, smoothstep(0.30, 1.0, y));
+        float3 c = mix(deep, middle, smoothstep(0.05, HORIZON + 0.10, y));
+        return mix(c, high, smoothstep(HORIZON + 0.10, 1.0, y));
     }
 
     // How strongly the waves focus sunlight at `depth` metres below surface point `q`: the inverse of how
@@ -198,13 +200,13 @@ enum SceneShaders {
     // The sky and the sun, as seen in direction `direction` above the water.
     float3 sky(float3 direction) {
         float sunAngle = saturate(dot(direction, normalize(SUN_IN_AIR)));
-        float3 c = mix(float3(0.55, 0.72, 0.95), float3(0.18, 0.38, 0.80), saturate(direction.y));
-        c += float3(1.0, 0.95, 0.85) * (pow(sunAngle, 3000.0) * 60.0 + pow(sunAngle, 200.0) * 3.0
-                                        + pow(sunAngle, 12.0) * 0.5);
+        // Evening sky: warm near the horizon and around the sun, blue-grey overhead.
+        float3 c = mix(float3(1.00, 0.60, 0.26), float3(0.50, 0.40, 0.38), pow(saturate(direction.y), 0.7));
+        c += SUN_COLOUR * (pow(sunAngle, 3000.0) * 60.0 + pow(sunAngle, 200.0) * 3.0 + pow(sunAngle, 10.0) * 0.7);
         return c;
     }
 
-    float3 toneMap(float3 c) { return 1.0 - exp(-c * 0.8); }
+    float3 toneMap(float3 c) { return 1.0 - exp(-c * 1.0); }
 
     // The underside of the surface, drawn where the line of sight really meets the waves. Inside Snell's
     // window the sky and the sun shine through; outside it the surface is a mirror for the water below. Every
@@ -233,7 +235,7 @@ enum SceneShaders {
         }
         c = toneMap(c);
         // Light reaching the camera through the water turns blue and fades with distance.
-        float3 clear = exp(-t * float3(0.090, 0.022, 0.012));
+        float3 clear = exp(-t * float3(0.030, 0.022, 0.016));
         return c * clear + body * (1.0 - clear);
     }
 
@@ -257,12 +259,12 @@ enum SceneShaders {
     // as bright as the long waves above have focused it, so the shafts sway and flicker with the waves; a shaft
     // is a line through the water along the sunlight, so collecting along the line of sight draws it as a streak.
     // Seawater scatters mostly forwards, so the shafts are strongest when looking towards the sun.
-    float3 lightShafts(SeaTextures sea, float3 ray, float2 pixel) {
+    float3 lightShafts(SeaTextures sea, float3 ray, float2 pixel, float y) {
         float3 sun = sunInWater();
         float g = 0.55;
         float mu = dot(ray, sun);
         float phase = (1.0 - g * g) / pow(1.0 + g * g - 2.0 * g * mu, 1.5);
-        const int STEPS = 16;
+        const int STEPS = 24;
         float range = ray.y > 0.0 ? min(32.0, (CAMERA_DEPTH - 0.3) / ray.y) : 32.0;
         float dt = range / float(STEPS);
         // A fixed per-pixel offset hides the steps without flickering from frame to frame.
@@ -274,9 +276,13 @@ enum SceneShaders {
             float depth = -point.y;
             if (depth < 0.3) continue;
             float focus = causticAt(sea, point.xz, depth, true);
-            light += ((focus - 1.0) * 2.4 + 0.10) * exp(-depth * 0.07) * exp(-t * 0.05) * dt;
+            light += ((focus - 1.0) * 1.8 + 0.10) * exp(-depth * 0.07) * exp(-t * 0.05) * dt;
         }
-        return float3(0.020, 0.085, 0.200) * 0.20 * max(light, 0.0) * min(phase, 6.0);
+        // Only very few rays reach the deep in the lower third of the picture.
+        float reach = mix(0.12, 1.0, smoothstep(0.08, HORIZON + 0.22, y));
+        // The light is warm just under the surface and turns blue on its way down.
+        float3 tint = mix(float3(0.030, 0.085, 0.180), float3(0.170, 0.115, 0.060), smoothstep(HORIZON, 1.0, y));
+        return tint * 0.19 * max(light, 0.0) * min(phase, 6.0) * reach;
     }
 
     float3 fogged(float3 c, float depth, float y) {
@@ -437,7 +443,7 @@ enum SceneShaders {
             col += float3(0.05, 0.07, 0.07) * m * (0.5 + 0.5 * fl);
         }
 
-        col += lightShafts(sea, ray, in.position.xy);
+        col += lightShafts(sea, ray, in.position.xy, in.uv.y);
 
         float2 v = (in.uv - 0.5) * float2(1.0, 0.8);
         col *= 1.0 - 0.35 * dot(v, v);
