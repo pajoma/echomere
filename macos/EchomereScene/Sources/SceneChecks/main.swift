@@ -159,6 +159,21 @@ check("an orca arriving or leaving doesn't move the others",
       munichBay.frame(at: noon, visitors: pod, echoes: []).whales.first { $0.id == "orca-1" }
           == munichBay.frame(at: noon, visitors: [pod[0]], echoes: []).whales.first { $0.id == "orca-1" })
 
+print("Whales move without jumps")
+// Follow an orca and a right whale second by second for six hours: through dives, breaths and visits.
+for id in ["orca-1", "right-1"] {
+    let poses = track(id, among: pod, from: noon, seconds: 6 * hour, every: 1)
+    var step = 0.0, turn = 0.0, rollChange = 0.0, steepest = 0.0
+    for (a, b) in zip(poses, poses.dropFirst()) {
+        step = max(step, distance(a, b))
+        turn = max(turn, acos(max(-1, min(1, (a.forward * b.forward).sum()))) * 180 / .pi)
+        rollChange = max(rollChange, abs(a.roll - b.roll) * 180 / .pi)
+        steepest = max(steepest, abs(asin(max(-1, min(1, b.forward.y)))) * 180 / .pi)
+    }
+    check("\(id) never jumps: in one second it moves at most \(String(format: "%.1f", step)) m, turns \(String(format: "%.1f", turn))°, rolls \(String(format: "%.1f", rollChange))°, and tilts at most \(Int(steepest))°",
+          poses.count == 6 * 3600 && step < 2 && turn < 20 && rollChange < 6 && steepest <= 30)
+}
+
 print("Pace, day and night")
 // The sky's hour is UTC, and `noon` above is just a fixed moment (21:20 UTC). Take the following day, when
 // all the visitors have arrived.

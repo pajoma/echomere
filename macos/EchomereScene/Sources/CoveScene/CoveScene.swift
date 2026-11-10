@@ -113,9 +113,11 @@ public struct CoveScene: Equatable, Sendable {
         struct Route {
             let seed: UInt64
             let amplitudeX, periodX, phaseX: Double
-            let centreZ, amplitudeZ, periodZ, phaseZ: Double
+            let centreZ, amplitudeZ, phaseZ: Double
             let periodY, phaseY: Double
-            let approachPeriod, approachPhase, nearest: Double
+            /// The whale comes to the front once in this many rounds of its route.
+            let roundsPerVisit: Double
+            let nearest: Double
             let breathingCycle, breathingOffset, breathInterval: Double
             let breaths: Int
 
@@ -127,12 +129,11 @@ public struct CoveScene: Equatable, Sendable {
                 phaseX = random.angle()
                 centreZ = random.range(62, 76)
                 amplitudeZ = random.range(14, 20)
-                periodZ = random.range(400, 640) / species.pace
-                phaseZ = random.angle()
+                // Kept away from a quarter turn, where the figure of eight would have a stopping point.
+                phaseZ = random.range(-0.9, 0.9)
                 periodY = random.range(240, 420)
                 phaseY = random.angle()
-                approachPeriod = random.range(3600, 7200)
-                approachPhase = random.angle()
+                roundsPerVisit = max(3, (random.range(3600, 7200) / periodX).rounded())
                 nearest = random.range(14, 22)
                 breathingCycle = random.range(species.breathingCycle.lowerBound, species.breathingCycle.upperBound)
                 breathingOffset = random.range(0, breathingCycle)
@@ -140,21 +141,30 @@ public struct CoveScene: Equatable, Sendable {
                 breathInterval = species.breathInterval * random.range(0.9, 1.1)
             }
 
-            /// Where the route is over the ground (x, z) at a moment.
+            /// Where the route is over the ground (x, z) at a moment. The route is a wide figure of eight,
+            /// traced by one clock, so the whale never comes to a stop and always has a direction.
             func ground(at t: Double) -> SIMD2<Double> {
-                // The visit to the front: 0 for most of the cycle, rising to 1 for a short while.
-                let visit = pow(0.5 + 0.5 * sin(cycle(t, approachPeriod) + approachPhase), 90)
-                let far = centreZ + amplitudeZ * sin(cycle(t, periodZ) + phaseZ)
-                return SIMD2(amplitudeX * (1 - 0.8 * visit) * sin(cycle(t, periodX) + phaseX),
-                             far + (nearest - far) * visit)
+                let around = cycle(t, periodX) + phaseX
+                // The visit to the front: 0 for most of the time, rising to 1 for a short while. It peaks when
+                // the whale crosses in front of the camera at its full sideways speed, so the whale swims past
+                // the camera; it never comes to it, stops and backs away.
+                // The whole visit fits into that one crossing: it is over before the whale reaches the far ends
+                // of its route, where it turns.
+                var long = cycle(t, periodX * roundsPerVisit) + phaseX / roundsPerVisit
+                long = long.truncatingRemainder(dividingBy: 2 * .pi)
+                if long > .pi { long -= 2 * .pi }
+                let fromCrossing = long * roundsPerVisit            // in radians of the route
+                let visit = exp(-(fromCrossing / 0.55) * (fromCrossing / 0.55))
+                let far = centreZ + amplitudeZ * sin(2 * around + phaseZ)
+                return SIMD2(amplitudeX * (1 - 0.6 * visit) * sin(around), far + (nearest - far) * visit)
             }
         }
 
         let species: WhaleSpecies
         let route: Route
-        /// An orca's place in its pod: seconds behind the lead, metres to the side and above or below, and
-        /// seconds after the pod's breath. All zero for a right whale.
-        let behind, beside, above, breathDelay: Double
+        /// An orca's place in its pod: seconds behind the lead, metres from the pod's line (in a fixed
+        /// direction), metres above or below, and seconds after the pod's breath. All zero for a right whale.
+        let behind, beside, besideAngle, above, breathDelay: Double
         /// A small wander of its own around its place.
         let wanderPeriod, wanderPhase: Double
         /// Depth of the whale's middle when its back breaks the surface, in metres.
@@ -170,14 +180,15 @@ public struct CoveScene: Equatable, Sendable {
                 // One route per cove and species, so every orca in the cove shares it.
                 route = Route(seed: combine(cove.value, stableHash("pod-\(look.species.rawValue)")), species: look.species)
                 behind = random.range(0, 30)
-                beside = random.range(-12, 12)
+                beside = random.range(3, 12)
+                besideAngle = random.angle()
                 above = random.range(-2, 2)
                 breathDelay = random.range(0, 4)
             } else {
                 route = Route(seed: own, species: look.species)
-                behind = 0; beside = 0; above = 0; breathDelay = 0
+                behind = 0; beside = 0; besideAngle = 0; above = 0; breathDelay = 0
             }
-            wanderPeriod = random.range(50, 90)
+            wanderPeriod = random.range(110, 170)
             wanderPhase = random.angle()
             surfaceDepth = 0.085 * look.length
             tailPeriod = random.range(4.5, 6.5)
@@ -209,8 +220,9 @@ public struct CoveScene: Equatable, Sendable {
             let dip = 0.5 + 0.5 * cos(2 * Double.pi * Double(route.breaths) * u)
             let surfaceY = -surfaceDepth * (1 + 2.2 * dip)
 
-            // Each dive goes to its own depth. The dive changes while the whale is at the surface.
-            let dive = UInt64(max((cycles + 0.5).rounded(.down), 0))
+            // Each dive goes to its own depth. A cycle runs from the middle of one surface series to the middle
+            // of the next, so the depth changes while the whale is at the surface, where it doesn't matter.
+            let dive = UInt64(max(cycles.rounded(.down), 0))
             var random = SplitMix64(seed: combine(route.seed, dive))
             let depth = random.unit()
             var diveCentre = -22 + 12 * depth
@@ -226,46 +238,53 @@ public struct CoveScene: Equatable, Sendable {
         func position(at t: Double) -> SIMD3<Double> {
             let along = travelTime(t) - behind
             var ground = route.ground(at: along)
-            if beside != 0 {
-                let ahead = route.ground(at: along + 2) - ground
-                let length = max((ahead * ahead).sum().squareRoot(), 1e-6)
-                ground += SIMD2(-ahead.y, ahead.x) / length * beside
-            }
+            ground += SIMD2(cos(besideAngle), sin(besideAngle)) * beside
             let wander = cycle(t, wanderPeriod) + wanderPhase
-            ground += SIMD2(2.5 * sin(wander), 2.5 * sin(wander * 0.7 + 1.3))
+            // Gentler than the slowest part of the route, so it can never bring the whale to a stop.
+            ground += SIMD2(0.5 * sin(wander), 0.5 * sin(wander + 1.3))
             let breath = breathing(at: t)
             return SIMD3(ground.x, breath.diveY + (breath.surfaceY - breath.diveY) * breath.atSurface, ground.y)
         }
 
-        struct State {
-            let position: SIMD3<Double>
-            let velocity: SIMD3<Double>
-            let acceleration: SIMD3<Double>
+        /// Velocity in metres per second, measured over two seconds so it is steady.
+        func velocity(at t: Double) -> SIMD3<Double> {
+            (position(at: t + 1) - position(at: t - 1)) / 2
         }
 
-        func state(at t: Double) -> State {
-            let step = 0.5
-            let before = position(at: t - step), now = position(at: t), after = position(at: t + step)
-            return State(position: now, velocity: (after - before) / (2 * step),
-                         acceleration: (after - 2 * now + before) / (step * step))
+        /// The compass direction the whale points in, in radians: the direction it swims in, averaged over
+        /// about 16 seconds. So where its path doubles back and it almost stops, it comes round slowly, the
+        /// way a whale turns, without spinning on the spot.
+        func heading(at t: Double) -> Double {
+            var sum = SIMD2<Double>(0, 0)
+            for offset in stride(from: -8.0, through: 8.0, by: 2.0) {
+                let v = velocity(at: t + offset)
+                let ground = (v.x * v.x + v.z * v.z).squareRoot()
+                if ground > 1e-9 { sum += SIMD2(v.x, v.z) / ground }
+            }
+            return atan2(sum.x, sum.y)
         }
     }
 
     func whalePose(for visitor: Visitor, at t: Double) -> WhalePose {
         let path = WhalePath(cove: seed, creatureID: visitor.creatureID, look: visitor.look)
-        let state = path.state(at: t)
-        let v = state.velocity, a = state.acceleration
-        let speed = max((v * v).sum().squareRoot(), 1e-6)
-        // The whale banks into its turns: the faster it turns, the further it leans.
-        let turnRate = (v.z * a.x - v.x * a.z) / max(v.x * v.x + v.z * v.z, 1e-6)
+        let v = path.velocity(at: t)
+        let ground = (v.x * v.x + v.z * v.z).squareRoot()
+        let speed = (v * v).sum().squareRoot()
+        let heading = path.heading(at: t)
+        // A whale tilts up when it climbs and down when it dives, but never steeply.
+        let pitch = min(max(atan2(v.y, max(ground, 0.45)), -0.5), 0.5)
+        // It banks into its turns, more the faster it turns, and rolls a little, lazily, as it swims.
+        var turn = path.heading(at: t + 1) - path.heading(at: t - 1)
+        if turn > .pi { turn -= 2 * .pi }
+        if turn < -.pi { turn += 2 * .pi }
+        let bank = min(max(turn / 2 * 4, -0.3), 0.3) * Sky.smooth(0.15, 0.4, ground)
         let sinceArrival = t - visitor.arrivedAt.timeIntervalSince1970
         return WhalePose(
             id: visitor.creatureID,
             species: visitor.look.species,
-            position: state.position,
-            forward: v / speed,
-            // It also rolls a little, lazily, as it swims.
-            roll: min(max(turnRate * 8, -0.35), 0.35) + 0.12 * sin(cycle(t, path.rollPeriod) + path.rollPhase),
+            position: path.position(at: t),
+            forward: SIMD3(sin(heading) * cos(pitch), sin(pitch), cos(heading) * cos(pitch)),
+            roll: bank + 0.12 * sin(cycle(t, path.rollPeriod) + path.rollPhase),
             tailPhase: wrapAngle(cycle(t, path.tailPeriod) + path.tailPhase),
             length: visitor.look.length,
             effort: min(max(speed / 0.8, 0.15), 1),
@@ -298,7 +317,7 @@ public struct CoveScene: Equatable, Sendable {
     func echoPose(for echo: Echo, at t: Double) -> EchoPose {
         let left = echo.leftAt.timeIntervalSince1970
         // The echo stays where the whale swam in this cove when it left, as the camera saw it.
-        let place = WhalePath(cove: seed, creatureID: echo.creatureID, look: echo.look).state(at: left).position
+        let place = WhalePath(cove: seed, creatureID: echo.creatureID, look: echo.look).position(at: left)
         let seen = SceneCamera.project(place, aspect: SceneRules.worldWidth)
         let position = (
             x: SceneRules.worldCentreX + ((seen?.x ?? 0.5) - 0.5) * SceneRules.worldWidth,
