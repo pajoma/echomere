@@ -53,11 +53,11 @@ enum SceneShaders {
 
     // MARK: Camera and sea
 
-    // The camera stands on the seabed, about 12 m down, and is tilted 15 degrees up, like a webcam on the
+    // The camera stands on the seabed, 30 m down (about as deep as giant kelp grows), and is tilted 15 degrees up, like a webcam on the
     // ground. It is a real perspective camera with a wide lens (70 degree vertical field of view): the lower
     // third of the picture looks into the deep, and Snell's window, where the sky shows through, lies along
     // the top.
-    constant float CAMERA_DEPTH = 12.0;
+    constant float CAMERA_DEPTH = 30.0;
     constant float FOCAL = 0.714;
     constant float PITCH = 0.262;
     constant float HORIZON = 0.309;            // 0.5 - FOCAL * tan(PITCH)
@@ -116,7 +116,7 @@ enum SceneShaders {
         float2 slope = 0.0;
         float jxx = 0.0, jzz = 0.0;
         for (int c = 0; c < 3; c++) {
-            float fade = c == 2 ? exp(-distance / 18.0) : (c == 1 ? exp(-distance / 90.0) : 1.0);
+            float fade = c == 2 ? exp(-distance / 30.0) : (c == 1 ? exp(-distance / 200.0) : 1.0);
             float4 d = sea.derivatives.sample(seaSampler, q / CASCADE_SIZES[c], c, level(0.0));
             slope += d.xy * fade;
             jxx += d.z * fade;
@@ -235,7 +235,7 @@ enum SceneShaders {
         }
         c = toneMap(c);
         // Light reaching the camera through the water turns blue and fades with distance.
-        float3 clear = exp(-t * float3(0.030, 0.022, 0.016));
+        float3 clear = exp(-t * float3(0.0150, 0.0130, 0.0100));
         return c * clear + body * (1.0 - clear);
     }
 
