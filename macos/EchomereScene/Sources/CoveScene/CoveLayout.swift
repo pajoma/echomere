@@ -69,13 +69,13 @@ public struct CoveLayout: Equatable, Sendable {
                 phases: SIMD4(random.angle(), random.angle(), random.angle(), random.angle()))
         }
 
-        // Giant kelp, kept in the background: a few plants far from the camera, soft shapes in the haze. They
+        // Giant kelp, only hinted at in the background: a few plants far from the camera, faint in the haze. They
         // are rooted on the seabed, which slopes away below the view, so the stalks rise into the picture from
         // its bottom edge.
         var fronds: [KelpFrond] = []
         let plants = random.int(5, 7)
         for plant in 0..<plants {
-            let z = 30 + 40 * (Double(plant) + random.unit()) / Double(plants)
+            let z = 55 + 45 * (Double(plant) + random.unit()) / Double(plants)
             let x = random.range(-0.95, 0.95) * z
             let depth = SceneRules.cameraDepth + 2 + 0.36 * z
             let plantPhase = random.angle()
@@ -95,7 +95,8 @@ public struct CoveLayout: Equatable, Sendable {
 
         schools = (0..<random.int(2, 4)).map { _ in
             FishSchool(
-                depth: random.range(0.3, 0.85),
+                // The small fish stay near the camera, in front of the whales and the kelp.
+                depth: random.range(0.05, 0.35),
                 size: random.range(0.8, 1.3),
                 tint: random.int(0, 3),
                 centreX: random.range(0.3, 1.3),

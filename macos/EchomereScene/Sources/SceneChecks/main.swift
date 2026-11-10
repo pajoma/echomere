@@ -68,7 +68,7 @@ let crowded = munichBay.frame(at: noon, visitors: crowd, echoes: [])
 check("at most six whales are drawn: five visitors and a creator's new whale",
       crowded.whales.count == SceneRules.maxWhales)
 
-var inView = 0, samples = 0, overhead = false
+var inView = 0, samples = 0, upFront = 0
 var fastest = 0.0, shallowest = -100.0, deepest = 0.0
 var previous: WhalePose?
 for step in stride(from: 0.0, to: day, by: 20) {
@@ -78,7 +78,7 @@ for step in stride(from: 0.0, to: day, by: 20) {
        seen.x > -0.1, seen.x < 1.1, seen.y > -0.1, seen.y < 1.1, seen.distance < 110 {
         inView += 1
     }
-    if hypot(whale.position.x, whale.position.z) < 15 { overhead = true }
+    if whale.position.z < 32 { upFront += 1 }
     shallowest = max(shallowest, whale.position.y)
     deepest = min(deepest, whale.position.y)
     if let previous {
@@ -90,7 +90,9 @@ for step in stride(from: 0.0, to: day, by: 20) {
 let inViewShare = Double(inView) / Double(samples)
 check("a whale roams in and out of view (in view \(Int(inViewShare * 100))% of the day)",
       inViewShare > 0.3 && inViewShare < 0.85)
-check("a whale passes over the camera at some point in the day", overhead)
+let upFrontShare = Double(upFront) / Double(samples)
+check("a whale comes to the front only rarely (\(String(format: "%.1f", upFrontShare * 100))% of the day)",
+      upFront > 0 && upFrontShare < 0.05)
 check("a whale stays between the seabed and the surface (\(Int(-shallowest)) to \(Int(-deepest)) m deep)",
       shallowest < -3 && deepest > -SceneRules.cameraDepth + 2)
 check("a whale swims at a whale's pace (at most \(String(format: "%.1f", fastest)) m/s)", fastest < 2)
@@ -129,8 +131,10 @@ check("kelp is rooted below the view and reaches the surface",
 let sway = Kelp.motion(at: noon), swayLater = Kelp.motion(at: noon + Kelp.surgePeriod / 4)
 var quarter = swayLater.surge - sway.surge
 if quarter < 0 { quarter += 2 * .pi }
-check("kelp stays in the background, at least 25 m from the camera",
-      munichBay.layout.kelp.allSatisfy { $0.baseZ > 25 })
+check("kelp is only hinted at, at least 50 m from the camera",
+      munichBay.layout.kelp.allSatisfy { $0.baseZ > 50 })
+check("the small fish swim near the camera, in front of the whales",
+      !munichBay.layout.schools.isEmpty && munichBay.layout.schools.allSatisfy { $0.depth < 0.4 })
 check("kelp sways with the swell (one sway every \(String(format: "%.1f", Kelp.surgePeriod)) s)",
       abs(quarter - .pi / 2) < 1e-6 && Kelp.surgePeriod > 8 && Kelp.surgePeriod < 10)
 check("kelp sways the same on every screen",

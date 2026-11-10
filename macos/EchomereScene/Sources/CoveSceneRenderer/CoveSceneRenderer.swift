@@ -33,6 +33,8 @@ public final class CoveSceneRenderer {
     // The whales: one model per species, drawn once per whale after the kelp.
     private let whalePipeline: MTLRenderPipelineState
     private let whaleModels: [WhaleSpecies: WhaleModel]
+    // The small fish, drawn last over everything.
+    private let fishPipeline: MTLRenderPipelineState
     /// Draws the sea from above instead of the scene, for checking the waves against footage of a real sea.
     public var showsSeaFromAbove = false
 
@@ -94,6 +96,19 @@ public final class CoveSceneRenderer {
             models[species] = try WhaleModel(species: species, device: device)
         }
         whaleModels = models
+
+        guard let fishFragment = library.makeFunction(name: "fish_fragment") else {
+            throw CoveSceneRendererError.missingShader("fish_fragment")
+        }
+        let fish = MTLRenderPipelineDescriptor()
+        fish.vertexFunction = vertex
+        fish.fragmentFunction = fishFragment
+        fish.colorAttachments[0].pixelFormat = pixelFormat
+        fish.colorAttachments[0].isBlendingEnabled = true
+        fish.colorAttachments[0].sourceRGBBlendFactor = .one
+        fish.colorAttachments[0].destinationRGBBlendFactor = .oneMinusSourceAlpha
+        fish.depthAttachmentPixelFormat = .depth32Float
+        fishPipeline = try device.makeRenderPipelineState(descriptor: fish)
 
         let mesh = KelpMesh.build()
         guard let vertices = mesh.vertices.withUnsafeBytes({ device.makeBuffer(bytes: $0.baseAddress!, length: $0.count) }),
@@ -250,6 +265,13 @@ public final class CoveSceneRenderer {
                 encoder.drawIndexedPrimitives(
                     type: .triangle, indexCount: model.indexCount, indexType: .uint32, indexBuffer: model.indices,
                     indexBufferOffset: 0)
+            }
+
+            if !frame.creatures.isEmpty {
+                encoder.setRenderPipelineState(fishPipeline)
+                encoder.setDepthStencilState(backdropDepth)
+                encoder.setFragmentBuffer(buffer, offset: 0, index: 0)
+                encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
             }
         }
         encoder.endEncoding()

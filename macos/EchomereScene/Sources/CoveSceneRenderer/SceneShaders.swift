@@ -1,9 +1,10 @@
 /// Metal source for the cove scene, compiled at runtime so the package builds without Xcode.
 ///
 /// The sea is simulated first (an FFT ocean, see `OceanShaders`); then `scene_fragment` draws the picture
-/// back to front: the water and the surface seen from below, echoes, small fish, marine snow, and
+/// back to front: the water and the surface seen from below, echoes, marine snow, and
 /// the light shafts. The surface and the shafts come from the same wave field, so the light moves with the
-/// waves. The kelp and the whales are drawn on top as 3D geometry (`kelp_*`, `whale_*`).
+/// waves. The kelp and the whales are drawn on top as 3D geometry (`kelp_*`, `whale_*`), and the small fish
+/// last, in front of everything (`fish_fragment`).
 ///
 ///
 /// The optics (refraction through the wave normal, Snell's window, total internal reflection, and caustics
@@ -315,7 +316,7 @@ enum SceneShaders {
         if (alpha <= 0.001) return float4(0.0);
 
         float3 silver = float3(0.24, 0.31, 0.35);
-        float3 gold = float3(0.34, 0.31, 0.19);
+        float3 gold = float3(0.27, 0.31, 0.30);
         float3 col = mix(silver, gold, saturate(c.x / 3.0));
         col *= 0.7 + 0.5 * saturate(q.y / 0.15 * 0.5 + 0.5);
         return float4(fogged(col, a.z, a.y, ambient), alpha);
@@ -343,7 +344,6 @@ enum SceneShaders {
         SeaTextures sea = { displacement, derivatives, curvature };
         float aspect = d[0].x;
         float t = d[0].y;
-        int creatureCount = int(d[0].z);
         int echoCount = int(d[1].x);
         float px = d[1].y;
         float2 p = float2(0.8 + (in.uv.x - 0.5) * aspect, in.uv.y);
@@ -360,13 +360,6 @@ enum SceneShaders {
             col += drawEcho(p, d[ECHOES + i * 2], d[ECHOES + i * 2 + 1], t, i);
         }
 
-
-        for (int i = 0; i < creatureCount; i++) {
-            int b = CREATURES + i * 3;
-            float4 c = d[b + 2];
-            float4 s = drawFish(p, d[b], d[b + 1], c, px, sky.ambient);
-            col = mix(col, s.rgb, s.a);
-        }
 
         // Marine snow, drifting down.
         for (int l = 0; l < 2; l++) {
@@ -387,6 +380,26 @@ enum SceneShaders {
         col *= 1.0 - 0.35 * dot(v, v);
         col += (hash21(in.position.xy) - 0.5) / 255.0;
         return float4(saturate(col), 1.0);
+    }
+
+    // The small fish, drawn last over the whole picture: they swim near the camera, in front of the whales
+    // and the kelp. The colour is premultiplied by its coverage.
+    fragment float4 fish_fragment(VOut in [[stage_in]], constant float4 *d [[buffer(0)]]) {
+        float aspect = d[0].x;
+        int fishCount = int(d[0].z);
+        float px = d[1].y;
+        float ambient = d[SKY + 1].w;
+        float2 p = float2(0.8 + (in.uv.x - 0.5) * aspect, in.uv.y);
+        float4 result = float4(0.0);
+        for (int i = 0; i < fishCount; i++) {
+            int b = CREATURES + i * 3;
+            float4 s = drawFish(p, d[b], d[b + 1], d[b + 2], px, ambient);
+            result = float4(result.rgb * (1.0 - s.a) + s.rgb * s.a, result.a * (1.0 - s.a) + s.a);
+        }
+        if (result.a <= 0.001) discard_fragment();
+        float2 v = (in.uv - 0.5) * float2(1.0, 0.8);
+        result.rgb *= 1.0 - 0.35 * dot(v, v);
+        return result;
     }
 
     // MARK: Kelp
@@ -533,8 +546,8 @@ enum SceneShaders {
 
         // The water between the kelp and the camera.
         float y = 1.0 - in.position.y * u[1].x;
-        float3 clear = exp(-distance * float3(0.070, 0.046, 0.040));
-        c = c * clear + water(y, ambient) * 0.75 * (1.0 - clear);
+        float3 clear = exp(-distance * float3(0.052, 0.040, 0.036));
+        c = c * clear + water(y, ambient) * 0.93 * (1.0 - clear);
         float2 v = float2(in.position.x * u[1].x / u[0].x - 0.5, y - 0.5) * float2(1.0, 0.8);
         c *= 1.0 - 0.35 * dot(v, v);
         return float4(saturate(c), 1.0);

@@ -102,29 +102,43 @@ public struct CoveScene: Equatable, Sendable {
     // MARK: - Whales
 
     /// A whale roams the cove on a slow, endless path, unique to this cove and this whale. It swims at about
-    /// walking pace between the seabed and the surface, passes in front of the camera and over it, and leaves
-    /// the view now and then.
+    /// walking pace between the seabed and the surface, mostly far from the camera. Only rarely, on a slow
+    /// cycle of its own, does it come to the front.
     struct WhalePath {
         let amplitudeX, periodX, phaseX: Double
         let centreZ, amplitudeZ, periodZ, phaseZ: Double
         let centreY, amplitudeY, periodY, phaseY: Double
+        let approachPeriod, approachPhase, nearest: Double
         let tailPeriod, tailPhase: Double
 
         init(cove: CoveSeed, creatureID: String) {
             var random = SplitMix64(seed: combine(cove.value, stableHash(creatureID)))
-            amplitudeX = random.range(26, 40)
-            periodX = random.range(330, 500)
+            amplitudeX = random.range(95, 125)
+            periodX = random.range(520, 760)
             phaseX = random.angle()
-            centreZ = random.range(22, 30)
-            amplitudeZ = random.range(20, 27)
-            periodZ = random.range(270, 410)
+            centreZ = random.range(62, 76)
+            amplitudeZ = random.range(14, 20)
+            periodZ = random.range(400, 640)
             phaseZ = random.angle()
             centreY = random.range(-17, -13)
             amplitudeY = random.range(5, 8)
             periodY = random.range(240, 420)
             phaseY = random.angle()
+            approachPeriod = random.range(3600, 7200)
+            approachPhase = random.angle()
+            nearest = random.range(14, 22)
             tailPeriod = random.range(4.5, 6.5)
             tailPhase = random.angle()
+        }
+
+        func position(at t: Double) -> SIMD3<Double> {
+            // The visit to the front: 0 for most of the cycle, rising to 1 for a short while.
+            let visit = pow(0.5 + 0.5 * sin(cycle(t, approachPeriod) + approachPhase), 90)
+            let far = centreZ + amplitudeZ * sin(cycle(t, periodZ) + phaseZ)
+            return SIMD3(
+                amplitudeX * (1 - 0.8 * visit) * sin(cycle(t, periodX) + phaseX),
+                centreY + amplitudeY * sin(cycle(t, periodY) + phaseY),
+                far + (nearest - far) * visit)
         }
 
         struct State {
@@ -134,18 +148,10 @@ public struct CoveScene: Equatable, Sendable {
         }
 
         func state(at t: Double) -> State {
-            func wave(_ centre: Double, _ amplitude: Double, _ period: Double, _ phase: Double)
-                -> (Double, Double, Double) {
-                let omega = 2 * Double.pi / period
-                let angle = cycle(t, period) + phase
-                return (centre + amplitude * sin(angle), amplitude * omega * cos(angle),
-                        -amplitude * omega * omega * sin(angle))
-            }
-            let x = wave(0, amplitudeX, periodX, phaseX)
-            let y = wave(centreY, amplitudeY, periodY, phaseY)
-            let z = wave(centreZ, amplitudeZ, periodZ, phaseZ)
-            return State(position: SIMD3(x.0, y.0, z.0), velocity: SIMD3(x.1, y.1, z.1),
-                         acceleration: SIMD3(x.2, y.2, z.2))
+            let step = 0.5
+            let before = position(at: t - step), now = position(at: t), after = position(at: t + step)
+            return State(position: now, velocity: (after - before) / (2 * step),
+                         acceleration: (after - 2 * now + before) / (step * step))
         }
     }
 
