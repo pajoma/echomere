@@ -2,6 +2,17 @@
 
 Echomere's code is under the MIT licence (see `LICENSE`). Parts of it are based on the work below.
 
+## web-ocean, Maksymilian Dendura
+
+The sea simulation in `macos/EchomereScene/Sources/CoveSceneRenderer/OceanShaders.swift` (the Tessendorf FFT
+ocean: JONSWAP wind sea with Donelan-Banner spreading, swell, choppy displacement, frequencies quantised to a
+time loop, and the radix-2 inverse FFT) is ported from web-ocean's `js/wgsl/sim.js`. Changes: translated from
+WGSL to Metal, three cascades instead of six, no foam, and an extra pass for the surface curvature.
+
+- Source: https://github.com/Noniv/web-ocean
+- Copyright (c) 2026 Maksymilian Dendura
+- Licence: MIT (text below)
+
 ## WebGL Water, Evan Wallace
 
 The water optics in `macos/EchomereScene/Sources/CoveSceneRenderer/SceneShaders.swift` (refraction through
@@ -11,7 +22,9 @@ wave model, not copied.
 
 - Source: https://github.com/evanw/webgl-water
 - Copyright 2011 Evan Wallace
-- Licence: MIT
+- Licence: MIT (text below)
+
+## MIT licence text (applies to both projects above)
 
 > Permission is hereby granted, free of charge, to any person obtaining a copy of this software and
 > associated documentation files (the "Software"), to deal in the Software without restriction, including

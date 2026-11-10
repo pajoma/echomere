@@ -56,13 +56,4 @@ public enum SceneBuffer {
         }
         return data
     }
-
-    /// The waves for the wave-field compute pass: (kx, kz, amplitude, phase), padded to `Sea.maxWaves`.
-    public static func packWaves(_ waves: [Wave]) -> [SIMD4<Float>] {
-        var data = [SIMD4<Float>](repeating: .zero, count: Sea.maxWaves)
-        for (i, w) in waves.prefix(Sea.maxWaves).enumerated() {
-            data[i] = SIMD4(Float(w.kx), Float(w.kz), Float(w.amplitude), Float(w.phase))
-        }
-        return data
-    }
 }

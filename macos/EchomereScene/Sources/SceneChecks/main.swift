@@ -113,32 +113,27 @@ check("creatures move smoothly from one frame to the next", largestStep < 0.01 &
 check("the scene has ambient life", !frame.fish.isEmpty)
 
 print("The sea")
-let seaNow = Sea.waves(at: noon)
-let seaLater = Sea.waves(at: noon + 1)
-let travelsAtDeepWaterSpeed = zip(seaNow, seaLater).allSatisfy { now, later in
-    let expected = Sea.angularFrequency(wavenumber: now.wavenumber).truncatingRemainder(dividingBy: 2 * .pi)
-    var advanced = (later.phase - now.phase).truncatingRemainder(dividingBy: 2 * .pi)
-    if advanced < 0 { advanced += 2 * .pi }
-    return abs(advanced - expected) < 1e-4
-}
-check("every wave travels at the deep-water speed for its length", travelsAtDeepWaterSpeed)
-let byLength = seaNow.sorted { $0.wavenumber < $1.wavenumber }
-let phaseSpeeds = byLength.map { Sea.angularFrequency(wavenumber: $0.wavenumber) / $0.wavenumber }
-check("long waves travel faster than short ones", zip(phaseSpeeds, phaseSpeeds.dropFirst()).allSatisfy { $0 >= $1 })
+check("the sea loops seamlessly every \(Int(Sea.loopPeriod)) s",
+      abs(Sea.time(at: noon) - Sea.time(at: noon + Sea.loopPeriod)) < 1e-6
+          && abs(Sea.time(at: noon + 1) - Sea.time(at: noon) - 1) < 1e-6)
 check("every cove has the same sea above it",
-      CoveScene(seed: CoveSeed(1)).frame(at: noon, visitors: [], echoes: []).waves
-          == CoveScene(seed: CoveSeed(2)).frame(at: noon, visitors: [], echoes: []).waves)
-let step = 2 * Double.pi / Sea.patchSize
-check("the sea repeats seamlessly every \(Int(Sea.patchSize)) m, so it can be tiled",
-      seaNow.allSatisfy { w in
-          let m = w.kx / step, n = w.kz / step
-          return abs(m - m.rounded()) < 1e-9 && abs(n - n.rounded()) < 1e-9
-      })
-check("the sea fits the renderer (at most \(Sea.maxWaves) waves)", seaNow.count <= Sea.maxWaves)
+      CoveScene(seed: CoveSeed(1)).frame(at: noon, visitors: [], echoes: []).seaTime
+          == CoveScene(seed: CoveSeed(2)).frame(at: noon, visitors: [], echoes: []).seaTime)
 
 print("Rendering")
 if let device = MTLCreateSystemDefaultDevice(), let renderer = try? CoveSceneRenderer(device: device) {
     check("the shaders compile", true)
+    if let stats = try? renderer.seaStatistics(seaTime: 123) {
+        for s in stats {
+            print(String(format: "        cascade %d: height %.3f m, slope %.3f, curvature %.3f /m",
+                         s.cascade, s.heightRMS, s.slopeRMS, s.curvatureRMS))
+        }
+        let total = stats.map(\.heightRMS).reduce(0) { $0 + $1 * $1 }.squareRoot()
+        check("the sea has waves of a calm, open sea (height RMS \(String(format: "%.2f", total)) m)",
+              total > 0.2 && total < 1.5)
+    } else {
+        check("the sea can be measured", false)
+    }
     if let first = try? renderer.snapshot(frame, width: 320, height: 200),
        let second = try? renderer.snapshot(frame, width: 320, height: 200),
        let firstData = first.dataProvider?.data as Data?,

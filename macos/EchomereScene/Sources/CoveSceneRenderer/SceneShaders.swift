@@ -1,11 +1,10 @@
 /// Metal source for the cove scene, compiled at runtime so the package builds without Xcode.
 ///
-/// Two passes per frame:
-/// 1. `wave_field` (compute) evaluates the sea's waves on a 32 m patch: height, slope and curvature.
-/// 2. `scene_fragment` draws the picture back to front: water and the surface seen from below, far ridge,
+/// The sea is simulated first (an FFT ocean, see `OceanShaders`); then `scene_fragment` draws the picture back to front: water and the surface seen from below, far ridge,
 ///    echoes, middle ridge, whales and fish, kelp, near ridge, marine snow, and the light shafts.
 ///    The surface, the shafts and the caustics on the seabed all come from the same wave field, so the
 ///    light moves with the waves.
+///
 ///
 /// The optics (refraction through the wave normal, Snell's window, total internal reflection, and caustics
 /// from the curvature of the refracting surface) follow the approach of Evan Wallace's WebGL Water
@@ -60,23 +59,26 @@ enum SceneShaders {
     constant float FOCAL = 1.0;
     constant float PITCH = -0.2915;            // -atan(0.3): puts the horizon at 80 % of the height
     constant float HORIZON = 0.80;
-    constant float PATCH = 32.0;               // Sea.patchSize
-    constant int WAVES = 24;                   // Sea.maxWaves
-    constant int SWELL_WAVES = 14;             // Sea.swellWaves
+    // Sea.cascadeSizes: long swell, wind sea, ripples.
+    constant float CASCADE_SIZES[3] = { 211.3, 39.7, 7.43 };
     constant float WATER_IOR = 1.333;
     // Seen this flat, every ray would be totally reflected. The surface is drawn as if the camera looked
     // up more steeply, so the sunlit Snell's window shows at the top of the picture.
     constant float ELEVATION_STRETCH = 7.0;
+    // Snell's window magnifies the waves seen from below; the slopes are gently exaggerated for the shading
+    // of the surface only (not for the light focusing).
+    constant float SLOPE_GAIN = 1.4;
 
     // The sun stands about 38 degrees high, ahead of the camera, so its light comes through the top of the picture.
     constant float3 SUN_IN_AIR = float3(0.05, 0.61, 0.79);
 
     struct SeaTextures {
-        texture2d<float> heights;              // (height, slope x, slope z, -)
-        texture2d<float> curvature;            // (d2h/dx2, d2h/dxdz, d2h/dz2, -)
+        texture2d_array<float> displacement;   // per cascade: (Dx, height, Dz, dDx/dz)
+        texture2d_array<float> derivatives;    // per cascade: (slope x, slope z, dDx/dx, dDz/dz)
+        texture2d_array<float> curvature;      // per cascade: (d2h/dx2, d2h/dxdz, d2h/dz2, -)
     };
 
-    constexpr sampler seaSampler(address::repeat, filter::linear);
+    constexpr sampler seaSampler(address::repeat, filter::linear, mip_filter::linear);
 
     float3 viewRay(float2 uv, float aspect) {
         float u = (uv.x - 0.5) * aspect;
@@ -102,20 +104,44 @@ enum SceneShaders {
 
     // How strongly the waves focus sunlight at `depth` metres below surface point `q`: the inverse of how
     // much a small bundle of refracted sunlight has spread (< 1) or narrowed (> 1) on its way down.
-    float focusAt(SeaTextures sea, float2 q, float depth) {
-        float4 c = sea.curvature.sample(seaSampler, q / PATCH);
-        // The sun is a disk, not a point, so deep caustics blur: the focusing stops growing with depth.
-        float blurred = depth / (1.0 + depth / 5.0);
+    // The slope of the surface at q (metres), summed over the cascades. Ripples finer than a pixel are faded
+    // out with distance; the choppy crests (horizontal displacement) steepen the slope.
+    float2 slopeAt(SeaTextures sea, float2 q, float distance) {
+        float2 slope = 0.0;
+        float jxx = 0.0, jzz = 0.0;
+        for (int c = 0; c < 3; c++) {
+            float fade = c == 2 ? exp(-distance / 18.0) : (c == 1 ? exp(-distance / 90.0) : 1.0);
+            float4 d = sea.derivatives.sample(seaSampler, q / CASCADE_SIZES[c], c, level(0.0));
+            slope += d.xy * fade;
+            jxx += d.z * fade;
+            jzz += d.w * fade;
+        }
+        return slope / max(float2(1.0 + jxx, 1.0 + jzz), 0.25);
+    }
+
+    // Curvature of the surface. `broad` keeps only the long waves: seen along a line of sight through the
+    // water, the fine caustic net averages out and only the broad focusing shows as light shafts.
+    float4 curvatureAt(SeaTextures sea, float2 q, bool broad) {
+        float4 c = sea.curvature.sample(seaSampler, q / CASCADE_SIZES[0], 0, level(0.0));
+        if (broad) return c + sea.curvature.sample(seaSampler, q / CASCADE_SIZES[1], 1, level(2.5));
+        return c + sea.curvature.sample(seaSampler, q / CASCADE_SIZES[1], 1, level(0.0));
+    }
+
+    float focusAt(SeaTextures sea, float2 q, float depth, bool broad) {
+        float4 c = curvatureAt(sea, q, broad);
+        // The sun is a disk, not a point, so deep caustics blur: the focusing grows more slowly with depth.
+        // The broad version already reads blurred curvature, so it needs less of this.
+        float blurred = depth / (1.0 + depth / (broad ? 20.0 : 8.0));
         float k = blurred * (1.0 - 1.0 / WATER_IOR);
         float jacobian = (1.0 + k * c.x) * (1.0 + k * c.z) - (k * c.y) * (k * c.y);
         return min(1.0 / max(abs(jacobian), 0.15), 4.0);
     }
 
     // Caustics on something at `depth` metres: the focused light, following the sun's slant to the surface.
-    float causticAt(SeaTextures sea, float2 position, float depth) {
+    float causticAt(SeaTextures sea, float2 position, float depth, bool broad) {
         float3 sun = sunInWater();
         float2 q = position + sun.xz * (depth / sun.y);
-        return focusAt(sea, q, depth);
+        return focusAt(sea, q, depth, broad);
     }
 
     // The underside of the surface. Inside Snell's window the sky and the sun shine through the waves;
@@ -128,14 +154,9 @@ enum SceneShaders {
         float elevation = min(asin(ray.y) * ELEVATION_STRETCH, 1.45);
         float3 incoming = float3(across.x * cos(elevation), sin(elevation), across.y * cos(elevation));
         float distance = CAMERA_DEPTH / sin(elevation);
-        // The band shows a wider stretch of sea than the steepened view would, so more waves fit in.
-        float2 q = incoming.xz * distance * 2.0;
-
-        float4 w = sea.heights.sample(seaSampler, q / PATCH);
-        // Seen from below, Snell's window magnifies the waves; the slopes are exaggerated for the shading
-        // (not for the caustics), and far waves blur into an even surface.
-        float detail = 3.2 * exp(-distance / 40.0);
-        float3 normal = normalize(float3(-w.y * detail, 1.0, -w.z * detail));
+        float2 q = incoming.xz * distance;
+        float2 slope = slopeAt(sea, q, distance) * SLOPE_GAIN;
+        float3 normal = normalize(float3(-slope.x, 1.0, -slope.y));
 
         // Outside Snell's window the surface mirrors the water below: facets tilted to see the lighter water
         // just under the surface look brighter than facets that see the dark depth.
@@ -161,27 +182,31 @@ enum SceneShaders {
         return mix(deep, c, haze);
     }
 
-    // Light shafts: sunlight scattered towards the camera. The light is sampled on a few slices at fixed
-    // distances in front of the camera; on each slice it is as bright as the waves above have focused it, so
-    // the shafts sway and flicker with the waves. Seawater scatters mostly forwards, so the shafts are
-    // strongest when looking towards the sun.
-    float3 lightShafts(SeaTextures sea, float3 ray) {
+    // Light shafts: sunlight scattered towards the camera along its line of sight. At every step the light is
+    // as bright as the long waves above have focused it, so the shafts sway and flicker with the waves; a shaft
+    // is a line through the water along the sunlight, so collecting along the line of sight draws it as a streak.
+    // Seawater scatters mostly forwards, so the shafts are strongest when looking towards the sun.
+    float3 lightShafts(SeaTextures sea, float3 ray, float2 pixel) {
         float3 sun = sunInWater();
         float g = 0.55;
         float mu = dot(ray, sun);
         float phase = (1.0 - g * g) / pow(1.0 + g * g - 2.0 * g * mu, 1.5);
-        float surfaceDistance = ray.y > 0.0 ? (CAMERA_DEPTH - 0.3) / ray.y : 1e6;
-        const float slices[5] = { 4.0, 7.0, 11.0, 16.0, 23.0 };
+        const int STEPS = 16;
+        float range = ray.y > 0.0 ? min(32.0, (CAMERA_DEPTH - 0.3) / ray.y) : 32.0;
+        float dt = range / float(STEPS);
+        // A fixed per-pixel offset hides the steps without flickering from frame to frame.
+        float2 cell = floor(pixel);
+        float offset = fract(52.9829189 * fract(0.06711056 * cell.x + 0.00583715 * cell.y));
         float light = 0.0;
-        for (int i = 0; i < 5; i++) {
-            float t = slices[i] / max(ray.z, 0.2);
-            if (t > surfaceDistance) break;
+        for (int i = 0; i < STEPS; i++) {
+            float t = (float(i) + offset) * dt;
             float3 point = float3(0.0, -CAMERA_DEPTH, 0.0) + ray * t;
             float depth = -point.y;
-            float focus = causticAt(sea, point.xz, depth);
-            light += (focus - 0.7) * exp(-depth * 0.07) * exp(-t * 0.05);
+            if (depth < 0.3) continue;
+            float focus = causticAt(sea, point.xz, depth, true);
+            light += ((focus - 1.0) * 2.4 + 0.10) * exp(-depth * 0.07) * exp(-t * 0.05) * dt;
         }
-        return float3(0.025, 0.090, 0.170) * max(light, 0.0) * phase;
+        return float3(0.035, 0.120, 0.220) * 0.45 * max(light, 0.0) * phase;
     }
 
     float3 fogged(float3 c, float depth, float y) {
@@ -205,8 +230,8 @@ enum SceneShaders {
         float3 c = rock * (0.45 + 0.55 * lit);
         float layerDepth = d[TERRAIN + layer * 4].y;
         float seabed = 10.0 + 6.0 * layerDepth;
-        float caustic = causticAt(sea, float2(p.x * 14.0, layerDepth * 30.0 + (h - p.y) * 20.0), seabed);
-        c += float3(0.05, 0.12, 0.15) * max(caustic - 0.6, 0.0) * causticStrength * lit;
+        float caustic = causticAt(sea, float2(p.x * 6.0, layerDepth * 20.0 + (h - p.y) * 8.0), seabed, false);
+        c += float3(0.06, 0.14, 0.17) * max(caustic - 0.8, 0.0) * causticStrength * lit;
         c = fogged(c, d[TERRAIN + layer * 4].y, p.y);
         return mix(col, c, cover);
     }
@@ -295,7 +320,7 @@ enum SceneShaders {
         float alpha = smoothstep(px, -px, abs(p.x - xc) - w) * smoothstep(1.0, 0.92, s);
         if (alpha <= 0.001) return float4(0.0);
         float3 col = mix(float3(0.030, 0.040, 0.018), float3(0.10, 0.12, 0.04), s);
-        col += float3(0.02, 0.04, 0.01) * max(causticAt(sea, float2(p.x * 14.0, a.w * 30.0), 8.0 + (1.0 - p.y) * 6.0) - 0.5, 0.0) * s;
+        col += float3(0.02, 0.04, 0.01) * max(causticAt(sea, float2(p.x * 14.0, a.w * 30.0), 8.0 + (1.0 - p.y) * 6.0, false) - 0.5, 0.0) * s;
         return float4(fogged(col, a.w, p.y), alpha);
     }
 
@@ -314,35 +339,11 @@ enum SceneShaders {
         return c;
     }
 
-    kernel void wave_field(texture2d<float, access::write> heights [[texture(0)]],
-                           texture2d<float, access::write> curvature [[texture(1)]],
-                           constant float4 *waves [[buffer(0)]],
-                           uint2 gid [[thread_position_in_grid]]) {
-        uint size = heights.get_width();
-        if (gid.x >= size || gid.y >= size) return;
-        float2 q = (float2(gid) + 0.5) / float(size) * PATCH;
-        float h = 0, hx = 0, hz = 0, hxx = 0, hxz = 0, hzz = 0;
-        for (int i = 0; i < WAVES; i++) {
-            float4 w = waves[i];                    // kx, kz, amplitude, phase
-            float theta = w.x * q.x + w.y * q.y - w.w;
-            float c = cos(theta), s = sin(theta);
-            h += w.z * c;
-            hx -= w.z * w.x * s;
-            hz -= w.z * w.y * s;
-            if (i < SWELL_WAVES) {                  // only the swell shapes the shafts and caustics
-                hxx -= w.z * w.x * w.x * c;
-                hxz -= w.z * w.x * w.y * c;
-                hzz -= w.z * w.y * w.y * c;
-            }
-        }
-        heights.write(float4(h, hx, hz, 0.0), gid);
-        curvature.write(float4(hxx, hxz, hzz, 0.0), gid);
-    }
-
     fragment float4 scene_fragment(VOut in [[stage_in]], constant float4 *d [[buffer(0)]],
-                                   texture2d<float> heights [[texture(0)]],
-                                   texture2d<float> curvature [[texture(1)]]) {
-        SeaTextures sea = { heights, curvature };
+                                   texture2d_array<float> displacement [[texture(0)]],
+                                   texture2d_array<float> derivatives [[texture(1)]],
+                                   texture2d_array<float> curvature [[texture(2)]]) {
+        SeaTextures sea = { displacement, derivatives, curvature };
         float aspect = d[0].x;
         float t = d[0].y;
         int creatureCount = int(d[0].z);
@@ -389,7 +390,7 @@ enum SceneShaders {
             col += float3(0.05, 0.07, 0.07) * m * (0.5 + 0.5 * fl);
         }
 
-        col += lightShafts(sea, ray);
+        col += lightShafts(sea, ray, in.position.xy);
 
         float2 v = (in.uv - 0.5) * float2(1.0, 0.8);
         col *= 1.0 - 0.35 * dot(v, v);

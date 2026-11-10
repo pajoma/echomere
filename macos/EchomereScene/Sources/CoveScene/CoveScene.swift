@@ -50,8 +50,8 @@ public struct SceneFrame: Equatable, Sendable {
     public let creatures: [CreaturePose]
     public let kelp: [KelpPose]
     public let echoes: [EchoPose]
-    /// The sea surface above the cove at this moment.
-    public let waves: [Wave]
+    /// The sea surface above the cove at this moment: the time within the sea's loop, in seconds.
+    public let seaTime: Double
 
     public var whales: [CreaturePose] { creatures.filter { $0.kind == .whale } }
     public var fish: [CreaturePose] { creatures.filter { $0.kind == .fish } }
@@ -100,7 +100,7 @@ public struct CoveScene: Equatable, Sendable {
 
         return SceneFrame(
             time: time, terrain: layout.terrain, creatures: creatures, kelp: kelp, echoes: Array(recentEchoes),
-            waves: Sea.waves(at: time))
+            seaTime: Sea.time(at: time))
     }
 
     // MARK: - Whales
