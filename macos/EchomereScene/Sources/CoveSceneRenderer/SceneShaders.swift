@@ -83,12 +83,20 @@ enum SceneShaders {
         if (above <= 0.0) return water(p.y);
         float distance = 0.30 / (above * 0.54 + 0.02);
         float2 s = float2((p.x - SUN.x) * distance, distance * 1.6) * 3.0;
-        float2 drift = float2(t * 0.06, t * 0.04);
-        float2 warp = float2(fbm(s * 0.45 + drift), fbm(s * 0.45 - drift.yx + 5.2));
-        float n = fbm(s + warp * 2.2 + drift);
-        float ridge = 1.0 - abs(fbm(s * 1.9 + warp * 1.6 - drift * 1.3) * 2.0 - 1.0);
-        float patches = smoothstep(0.46, 0.66, n) * (1.0 - 0.65 * smoothstep(0.78, 0.96, ridge));
+        // Two wave trains cross each other, so the pattern changes shape in place instead of sliding.
+        float2 flowA = float2(t * 0.035, t * 0.022);
+        float2 flowB = float2(-t * 0.028, t * 0.031);
+        float2 warp = float2(fbm(s * 0.45 + flowA), fbm(s * 0.45 + flowB + 5.2));
+        float nA = fbm(s + warp * 2.2 + flowA * 1.3);
+        float nB = fbm(s * 1.15 - warp * 1.7 + flowB * 1.3 + 3.7);
+        float swell = 0.06 * sin(t * 0.33 + s.x * 0.7 + s.y * 0.4);
+        float n = 0.5 * (nA + nB) + swell;
+        float ridge = 1.0 - abs(fbm(s * 1.9 + warp * 1.6 + flowB * 1.6)
+                              - fbm(s * 2.1 - warp + flowA * 1.6)) * 2.2;
+        float patches = smoothstep(0.47, 0.61, n) * (1.0 - 0.6 * smoothstep(0.80, 0.97, ridge));
         float ripples = smoothstep(0.55, 0.95, ridge);
+        // Glints that come and go where the sun catches a wave.
+        float glint = smoothstep(0.78, 0.97, valueNoise(s * 7.0 + float2(t * 0.8, -t * 0.6)));
 
         float2 toSun = (p - SUN) * float2(0.8, 2.2);
         float sun = exp(-dot(toSun, toSun) / 0.24);
@@ -96,6 +104,7 @@ enum SceneShaders {
         float3 c = water(p.y) * (0.82 + 0.25 * ripples);
         c += float3(0.20, 0.45, 0.75) * patches * (0.18 + 0.9 * sun);
         c += float3(0.75, 0.90, 1.00) * smoothstep(0.55, 1.0, patches) * sun * 1.5;
+        c += float3(0.80, 0.92, 1.00) * glint * patches * sun * 0.8;
         return mix(water(p.y), c, haze);
     }
 
@@ -103,9 +112,13 @@ enum SceneShaders {
     float3 lightShafts(float2 p, float t) {
         float2 d = p - SUN;
         float angle = atan2(d.x, -d.y);
-        float rays = 0.5 + 0.5 * sin(angle * 61.0 + t * 0.05 + 1.5 * sin(angle * 7.0 + t * 0.03));
-        rays *= 0.5 + 0.5 * sin(angle * 37.0 - t * 0.04 + 2.0);
-        rays *= 0.6 + 0.4 * sin(angle * 13.0 + t * 0.02);
+        // The fan sways gently, and each ray brightens and fades on its own as waves above focus the light.
+        float a = angle + 0.015 * sin(t * 0.11) + 0.008 * sin(t * 0.23 + 1.3);
+        float structure = 0.5 + 0.5 * sin(a * 61.0 + 1.5 * sin(a * 7.0));
+        structure *= 0.5 + 0.5 * sin(a * 37.0 + 2.0);
+        float shimmer = valueNoise(float2(a * 26.0, t * 0.35));
+        float slow = valueNoise(float2(a * 9.0 + 3.0, t * 0.12));
+        float rays = structure * (0.25 + 0.95 * shimmer) * (0.55 + 0.45 * slow) * 1.2;
         // The rays reach all the way down to the seabed, fading only slowly with depth.
         float reach = mix(0.45, 1.0, exp(-pow(length(d) / 0.9, 2.0)));
         float cone = exp(-angle * angle / 0.30);

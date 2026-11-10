@@ -8,6 +8,9 @@ import QuartzCore
 // Usage:
 //   swift run ScenePreview [--seed N] [--whales N] [--echoes N] [--speed X] [--fps N] [--scale X]
 //   swift run ScenePreview --snapshot out.png [--at UNIX_SECONDS] [--size 1600x1000] [--seed N] ...
+//   swift run ScenePreview --frames DIR --seconds N [--fps N] [--at UNIX_SECONDS] [--size WxH] ...
+//     (numbered PNGs; turn them into a clip with:
+//      ffmpeg -framerate 15 -i DIR/frame-%05d.png -pix_fmt yuv420p clip.mp4)
 //
 // In the window: space shows another cove, Esc quits.
 
@@ -19,6 +22,8 @@ struct Options {
     var fps = 15
     var renderScale = 0.5
     var snapshot: String?
+    var framesDirectory: String?
+    var seconds = 10.0
     var at: Date?
     var width = 1600
     var height = 1000
@@ -35,6 +40,8 @@ struct Options {
             case "--fps": fps = min(max(Int(value) ?? fps, 1), 60)
             case "--scale": renderScale = min(max(Double(value) ?? renderScale, 0.1), 1)
             case "--snapshot": snapshot = value
+            case "--frames": framesDirectory = value
+            case "--seconds": seconds = Double(value) ?? seconds
             case "--at": at = Double(value).map { Date(timeIntervalSince1970: $0) }
             case "--size":
                 let parts = value.split(separator: "x").compactMap { Int($0) }
@@ -59,6 +66,29 @@ do {
 } catch {
     FileHandle.standardError.write(Data("Renderer failed: \(error)\n".utf8))
     exit(1)
+}
+
+if let directory = options.framesDirectory {
+    let start = options.at ?? Date()
+    let scene = CoveScene(seed: CoveSeed(options.seed))
+    let visitors = SampleCove.visitors(seed: options.seed, count: options.whales, now: start.addingTimeInterval(-600))
+    let echoes = SampleCove.echoes(seed: options.seed, count: options.echoes, now: start)
+    let count = Int(options.seconds * Double(options.fps))
+    do {
+        try FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true)
+        for index in 0..<count {
+            let time = start.addingTimeInterval(Double(index) / Double(options.fps) * options.speed)
+            let image = try renderer.snapshot(
+                scene.frame(at: time, visitors: visitors, echoes: echoes), width: options.width, height: options.height)
+            try writePNG(image, to: URL(fileURLWithPath: directory)
+                .appendingPathComponent(String(format: "frame-%05d.png", index)))
+        }
+        print("Wrote \(count) frames to \(directory)")
+    } catch {
+        FileHandle.standardError.write(Data("Frames failed: \(error)\n".utf8))
+        exit(1)
+    }
+    exit(0)
 }
 
 if let path = options.snapshot {
