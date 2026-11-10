@@ -19,17 +19,6 @@ public struct TerrainLayer: Equatable, Sendable {
     }
 }
 
-public struct KelpStalk: Equatable, Sendable {
-    public let rootX: Double
-    public let rootY: Double
-    public let height: Double
-    public let depth: Double
-    public let swayAmplitude: Double
-    public let swayPeriod: Double
-    public let phase: Double
-    public let width: Double
-}
-
 public struct FishSchool: Equatable, Sendable {
     public struct Member: Equatable, Sendable {
         public let offsetX: Double
@@ -56,7 +45,7 @@ public struct FishSchool: Equatable, Sendable {
 /// Everything about a cove that is generated once from its seed: seabed, kelp and ambient life.
 public struct CoveLayout: Equatable, Sendable {
     public let terrain: [TerrainLayer]
-    public let kelp: [KelpStalk]
+    public let kelp: [KelpFrond]
     public let schools: [FishSchool]
 
     public init(seed: CoveSeed) {
@@ -80,25 +69,27 @@ public struct CoveLayout: Equatable, Sendable {
                 phases: SIMD4(random.angle(), random.angle(), random.angle(), random.angle()))
         }
 
-        // Kelp grows on the seabed, which lies below the view: it reaches up into the picture from its bottom
-        // edge.
-        var stalks: [KelpStalk] = []
-        for _ in 0..<random.int(1, 3) {
-            let standX = random.range(0.05, 1.55)
-            for _ in 0..<random.int(4, 9) {
-                let rootX = standX + random.range(-0.07, 0.07)
-                stalks.append(KelpStalk(
-                    rootX: rootX,
-                    rootY: -0.06,
-                    height: random.range(0.30, 0.68),
-                    depth: random.range(0.15, 0.45),
-                    swayAmplitude: random.range(0.02, 0.05),
-                    swayPeriod: random.range(6, 10),
-                    phase: random.angle(),
-                    width: random.range(0.003, 0.006)))
+        // Giant kelp: a few plants, each a bundle of stalks. They are rooted on the seabed, which slopes away
+        // below the view, so the stalks rise into the picture from its bottom edge.
+        var fronds: [KelpFrond] = []
+        for plant in 0..<random.int(5, 7) {
+            let z = 7 + 28 * (Double(plant) + random.unit()) / 7
+            let x = random.range(-0.95, 0.95) * z
+            let depth = SceneRules.cameraDepth + 2 + 0.36 * z
+            let plantPhase = random.angle()
+            for _ in 0..<random.int(3, 5) {
+                fronds.append(KelpFrond(
+                    baseX: x + random.range(-0.12, 0.12),
+                    baseZ: z + random.range(-0.12, 0.12),
+                    baseDepth: depth,
+                    length: depth + random.range(2, 7),
+                    swayPhase: plantPhase + random.range(-0.25, 0.25),
+                    twistPhase: random.angle(),
+                    bladeSeed: random.range(0, 100),
+                    bladeScale: random.range(0.85, 1.2)))
             }
         }
-        kelp = stalks
+        kelp = fronds
 
         schools = (0..<random.int(2, 4)).map { _ in
             FishSchool(

@@ -2,7 +2,7 @@
 
 The cove scene for macOS (issue #7): what every screen in a cove shows, drawn natively with Metal.
 
-![A cove with whales, kelp and small fish](docs/scene-preview.jpg)
+![A cove seen from the seabed: the sea surface, giant kelp, whales and small fish](docs/scene-preview.jpg)
 
 ## Modules
 

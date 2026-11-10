@@ -20,17 +20,6 @@ public struct CreaturePose: Equatable, Sendable {
     public let pattern: Int
 }
 
-public struct KelpPose: Equatable, Sendable {
-    public let rootX: Double
-    public let rootY: Double
-    public let height: Double
-    public let depth: Double
-    /// Current sideways offset of the tip.
-    public let sway: Double
-    public let phase: Double
-    public let width: Double
-}
-
 public struct EchoPose: Equatable, Sendable {
     public let x: Double
     public let y: Double
@@ -48,7 +37,8 @@ public struct SceneFrame: Equatable, Sendable {
     public let terrain: [TerrainLayer]
     /// Whales and fish, ordered from far to near.
     public let creatures: [CreaturePose]
-    public let kelp: [KelpPose]
+    public let kelp: [KelpFrond]
+    public let kelpMotion: KelpMotion
     public let echoes: [EchoPose]
     /// The sea surface above the cove at this moment: the time within the sea's loop, in seconds.
     public let seaTime: Double
@@ -81,17 +71,6 @@ public struct CoveScene: Equatable, Sendable {
 
         let creatures = (whales + fish).sorted { ($0.depth, $0.id) > ($1.depth, $1.id) }
 
-        let kelp = layout.kelp.map { stalk in
-            KelpPose(
-                rootX: stalk.rootX,
-                rootY: stalk.rootY,
-                height: stalk.height,
-                depth: stalk.depth,
-                sway: stalk.swayAmplitude * sin(cycle(t, stalk.swayPeriod) + stalk.phase),
-                phase: stalk.phase,
-                width: stalk.width)
-        }
-
         let recentEchoes = echoes
             .filter { $0.leftAt <= time && time.timeIntervalSince($0.leftAt) < SceneRules.echoLifetime }
             .sorted { ($0.leftAt, $0.creatureID) > ($1.leftAt, $1.creatureID) }
@@ -99,7 +78,8 @@ public struct CoveScene: Equatable, Sendable {
             .map { echoPose(for: $0, at: t) }
 
         return SceneFrame(
-            time: time, terrain: layout.terrain, creatures: creatures, kelp: kelp, echoes: Array(recentEchoes),
+            time: time, terrain: layout.terrain, creatures: creatures, kelp: layout.kelp,
+            kelpMotion: Kelp.motion(at: time), echoes: Array(recentEchoes),
             seaTime: Sea.time(at: time))
     }
 

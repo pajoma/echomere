@@ -60,4 +60,7 @@ public enum SceneRules {
     /// the sea to the left and right, always centred on `worldCentreX`.
     public static let worldWidth = 1.6
     public static let worldCentreX = 0.8
+    /// The camera stands on the seabed this far below the surface, in metres. Must match `CAMERA_DEPTH` in the
+    /// shader.
+    public static let cameraDepth = 30.0
 }

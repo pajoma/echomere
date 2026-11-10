@@ -1,9 +1,9 @@
 /// Metal source for the cove scene, compiled at runtime so the package builds without Xcode.
 ///
 /// The sea is simulated first (an FFT ocean, see `OceanShaders`); then `scene_fragment` draws the picture
-/// back to front: the water and the surface seen from below, echoes, whales and fish, kelp, marine snow, and
-/// the light shafts. The surface, the shafts and the caustics on the kelp all come from the same wave field,
-/// so the light moves with the waves.
+/// back to front: the water and the surface seen from below, echoes, whales and fish, marine snow, and
+/// the light shafts. The surface and the shafts come from the same wave field, so the light moves with the
+/// waves. The kelp is drawn on top as 3D geometry (`kelp_vertex`, `kelp_fragment`).
 ///
 ///
 /// The optics (refraction through the wave normal, Snell's window, total internal reflection, and caustics
@@ -18,7 +18,6 @@ enum SceneShaders {
     // Must match SceneBuffer.
     constant int TERRAIN = 2;
     constant int CREATURES = 14;
-    constant int KELP = 230;
     constant int ECHOES = 326;
 
     constant float3 WHALE_COLOURS[6] = {
@@ -152,10 +151,12 @@ enum SceneShaders {
 
     // Height of the long waves at the point x (metres). The choppy crests are waves pushed sideways, so the
     // sideways push is undone first to find which part of the wave lies above x.
-    float heightAt(SeaTextures sea, float2 x) {
-        float4 d = sea.displacement.sample(seaSampler, x / CASCADE_SIZES[0], 0, level(0.0));
-        return sea.displacement.sample(seaSampler, (x - d.xz) / CASCADE_SIZES[0], 0, level(0.0)).y;
+    float heightOf(texture2d_array<float> displacement, float2 x) {
+        float4 d = displacement.sample(seaSampler, x / CASCADE_SIZES[0], 0, level(0.0));
+        return displacement.sample(seaSampler, (x - d.xz) / CASCADE_SIZES[0], 0, level(0.0)).y;
     }
+
+    float heightAt(SeaTextures sea, float2 x) { return heightOf(sea.displacement, x); }
 
     // Where a line of sight meets the waves: the distance along the ray, or a negative value if it never
     // does. Works from below and from above. The ray is walked through the layer the waves occupy until it
@@ -365,18 +366,6 @@ enum SceneShaders {
         return float4(fogged(col, a.z, a.y), alpha);
     }
 
-    float4 drawKelp(float2 p, float4 a, float4 b, float px, float t, SeaTextures sea) {
-        float s = (p.y - a.y) / a.z;
-        if (s < 0.0 || s > 1.0) return float4(0.0);
-        float xc = a.x + b.x * s * s + 0.006 * sin(s * 9.0 + b.y + t * 0.3);
-        float w = b.z * (1.0 - 0.55 * s) * (1.0 + 1.1 * max(0.0, sin(s * 47.0 + b.y * 3.0)));
-        float alpha = smoothstep(px, -px, abs(p.x - xc) - w) * smoothstep(1.0, 0.92, s);
-        if (alpha <= 0.001) return float4(0.0);
-        float3 col = mix(float3(0.030, 0.040, 0.018), float3(0.10, 0.12, 0.04), s);
-        col += float3(0.02, 0.04, 0.01) * max(causticAt(sea, float2(p.x * 14.0, a.w * 30.0), 8.0 + (1.0 - p.y) * 6.0, false) - 0.5, 0.0) * s;
-        return float4(fogged(col, a.w, p.y), alpha);
-    }
-
     float3 drawEcho(float2 p, float4 a, float4 b, float t, int i) {
         float r = 0.06 * b.y * (1.15 - 0.6 * a.z);
         float2 rel = p - a.xy;
@@ -400,7 +389,6 @@ enum SceneShaders {
         float aspect = d[0].x;
         float t = d[0].y;
         int creatureCount = int(d[0].z);
-        int kelpCount = int(d[0].w);
         int echoCount = int(d[1].x);
         float px = d[1].y;
         float2 p = float2(0.8 + (in.uv.x - 0.5) * aspect, in.uv.y);
@@ -424,12 +412,6 @@ enum SceneShaders {
             col = mix(col, s.rgb, s.a);
         }
 
-        for (int i = 0; i < kelpCount; i++) {
-            float4 k = drawKelp(p, d[KELP + i * 2], d[KELP + i * 2 + 1], px, t, sea);
-            col = mix(col, k.rgb, k.a);
-        }
-
-
         // Marine snow, drifting down.
         for (int l = 0; l < 2; l++) {
             float fl = float(l);
@@ -449,6 +431,154 @@ enum SceneShaders {
         col *= 1.0 - 0.35 * dot(v, v);
         col += (hash21(in.position.xy) - 0.5) / 255.0;
         return float4(saturate(col), 1.0);
+    }
+
+    // MARK: Kelp
+
+    // Giant kelp as geometry. One mesh (see KelpMesh) is drawn once per stalk; this shader bends the stalk
+    // through the water and hangs the blades on it.
+
+    constant float BLADES = 96.0;                         // KelpMesh.blades
+    constant float2 CURRENT = float2(0.80, 0.60);         // the way the current flows (x, z)
+    constant float2 SURGE = float2(0.60, 0.80);           // the way the swell pushes the water back and forth
+
+    struct KelpIn { float4 data [[attribute(0)]]; };       // s, u, v, blade
+    struct KelpOut {
+        float4 position [[position]];
+        float3 world;
+        float3 normal;
+        float2 uv;                                         // along and across a blade
+        float blade;                                       // < 0 for the stalk
+    };
+
+    float4 project(float3 world, float aspect) {
+        float3 d = world - float3(0.0, -CAMERA_DEPTH, 0.0);
+        float cp = cos(PITCH), sp = sin(PITCH);
+        float yc = d.y * cp - d.z * sp;
+        float zc = d.y * sp + d.z * cp;
+        float near = 0.3, far = 400.0;
+        return float4(2.0 * FOCAL * d.x / aspect, 2.0 * FOCAL * yc, far / (far - near) * (zc - near), zc);
+    }
+
+    // A point on the stalk. s runs 0...1 from root to tip. `rise` returns how high the point is, 0 at the
+    // root and 1 at the surface.
+    float3 stalkPoint(float4 a, float4 b, float s, constant float4 *u, texture2d_array<float> displacement,
+                      thread float &rise) {
+        float depth = a.y;
+        float along = s * a.w;
+        float top = depth - 0.6;                           // the stalk levels off just below the surface
+        float below = 1.5 * log(1.0 + exp((top - along) / 1.5));
+        float y = -0.6 - below;
+        float height = top - below;
+        float trail = max(along - height, 0.0);            // the part lying along the surface
+        rise = saturate(height / top);
+
+        float2 xz = a.xz;
+        xz += CURRENT * (trail * 0.9 + 0.20 * height * rise);              // leans and trails with the current
+        xz += SURGE * (0.52 + 0.79 * rise) * pow(rise, 1.2) * sin(u[0].y - 1.0 * s + b.x);
+        xz += float2(-CURRENT.y, CURRENT.x) * 0.3 * rise * sin(u[0].z + b.x * 1.7);
+        // The stalks of one plant wind loosely around each other.
+        xz += 0.07 * float2(cos(along * 0.35 + b.y), sin(along * 0.35 + b.y)) * smoothstep(0.0, 4.0, along);
+        // The canopy rides the waves.
+        y += smoothstep(3.0, 0.5, -y) * heightOf(displacement, xz);
+        return float3(xz.x, y, xz.y);
+    }
+
+    vertex KelpOut kelp_vertex(KelpIn in [[stage_in]], uint instance [[instance_id]],
+                               constant float4 *fronds [[buffer(1)]],
+                               constant float4 *u [[buffer(2)]],
+                               texture2d_array<float> displacement [[texture(0)]]) {
+        float4 a = fronds[instance * 2];                   // base x, base depth, base z, length
+        float4 b = fronds[instance * 2 + 1];               // sway phase, twist phase, blade seed, blade scale
+        float aspect = u[0].x;
+        float3 camera = float3(0.0, -CAMERA_DEPTH, 0.0);
+        KelpOut out;
+        out.blade = in.data.w;
+        float rise;
+
+        if (in.data.w < 0.0) {                             // the stalk: a ribbon that faces the camera
+            float s = in.data.x;
+            float3 centre = stalkPoint(a, b, s, u, displacement, rise);
+            float3 ahead = stalkPoint(a, b, min(s + 0.01, 1.0), u, displacement, rise);
+            float3 behind = stalkPoint(a, b, max(s - 0.01, 0.0), u, displacement, rise);
+            float3 tangent = normalize(ahead - behind);
+            float3 toCamera = normalize(camera - centre);
+            float3 side = normalize(cross(tangent, toCamera));
+            // Never thinner than about a pixel, so distant stalks don't break up.
+            float width = max(0.035, length(camera - centre) * u[1].x * 0.9);
+            out.world = centre + side * in.data.z * width;
+            out.normal = toCamera;
+            out.uv = float2(s, in.data.z);
+        } else {
+            float j = in.data.w;
+            float h1 = hash21(float2(j, b.z)), h2 = hash21(float2(j + 17.0, b.z)), h3 = hash21(float2(j + 41.0, b.z));
+            // Blades sit closer together towards the top.
+            float s = 0.06 + 0.94 * pow((j + h1) / BLADES, 0.75);
+            float3 base = stalkPoint(a, b, s, u, displacement, rise);
+
+            float theta = j * 2.39996 + b.z;
+            // Blades hang off the stalk in all directions and stream with the current.
+            float3 direction = float3(cos(theta), -0.35 + 0.6 * (h2 - 0.5), sin(theta)) * 0.55
+                             + float3(CURRENT.x, 0.0, CURRENT.y) * 0.9;
+            // Blades trail behind the stalk as the surge moves it.
+            float velocity = cos(u[0].y - 1.0 * s + b.x);
+            direction -= float3(SURGE.x, 0.0, SURGE.y) * velocity * 0.6 * rise;
+            direction = normalize(direction);
+            float3 across = normalize(cross(direction, float3(0.0, 1.0, 0.0)));
+            float3 normal = cross(across, direction);
+            float twist = h3 * 6.2832;
+            float3 turned = across * cos(twist) + normal * sin(twist);
+            normal = cross(turned, direction);
+
+            float along = in.data.y;
+            float bladeLength = (0.80 + 0.60 * h2) * b.w;
+            float flutter = sin(u[0].w * (h1 < 0.5 ? 1.0 : 2.0) + j * 1.3);
+            float3 point = base + direction * bladeLength * along
+                         + normal * (0.12 * along * along * flutter + 0.05 * along * sin(along * 9.0 + j))
+                         + float3(0.0, -0.18, 0.0) * along * along * bladeLength;   // the tip droops
+            float halfWidth = 0.115 * b.w * pow(sin(3.14159 * pow(along, 0.55)), 0.8)
+                            + 0.022 * exp(-pow(along / 0.06, 2.0));        // the gas bladder at the base
+            out.world = point + turned * in.data.z * halfWidth;
+            out.normal = normal;
+            out.uv = float2(along, in.data.z);
+        }
+        out.position = project(out.world, aspect);
+        return out;
+    }
+
+    fragment float4 kelp_fragment(KelpOut in [[stage_in]], constant float4 *u [[buffer(0)]]) {
+        float3 camera = float3(0.0, -CAMERA_DEPTH, 0.0);
+        float3 toCamera = camera - in.world;
+        float distance = length(toCamera);
+        float3 view = toCamera / distance;
+        float3 normal = normalize(in.normal);
+        if (dot(normal, view) < 0.0) normal = -normal;
+        float3 sun = sunInWater();
+        float depth = max(-in.world.y, 0.0);
+        float sunlight = exp(-depth * 0.055);
+
+        float3 c;
+        if (in.blade < 0.0) {
+            c = float3(0.045, 0.036, 0.016) * (0.35 + 0.9 * sunlight);
+        } else {
+            float lit = saturate(dot(normal, sun));
+            // Sunlight shining through a blade towards the camera glows amber, most at the thin edges.
+            float behind = saturate(dot(-normal, sun) + 0.25);
+            float towards = pow(saturate(dot(-view, sun) * 0.5 + 0.5), 2.0);
+            float through = behind * towards * (0.65 + 0.35 * abs(in.uv.y));
+            c = float3(0.110, 0.095, 0.030) * (0.30 + 0.9 * sunlight + 1.4 * lit * sunlight)
+              + float3(0.80, 0.47, 0.10) * through * sunlight * 2.2;
+            c *= 1.0 - 0.30 * smoothstep(0.18, 0.0, abs(in.uv.y));         // the midrib
+            c *= 0.92 + 0.08 * sin(in.uv.x * 38.0 + in.blade);              // the wrinkled surface
+        }
+
+        // The water between the kelp and the camera.
+        float y = 1.0 - in.position.y * u[1].x;
+        float3 clear = exp(-distance * float3(0.060, 0.034, 0.027));
+        c = c * clear + water(y) * 0.55 * (1.0 - clear);
+        float2 v = float2(in.position.x * u[1].x / u[0].x - 0.5, y - 0.5) * float2(1.0, 0.8);
+        c *= 1.0 - 0.35 * dot(v, v);
+        return float4(saturate(c), 1.0);
     }
     """
 }

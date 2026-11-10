@@ -22,6 +22,14 @@ public final class CoveSceneRenderer {
     let queue: MTLCommandQueue
     private let pipeline: MTLRenderPipelineState
     let ocean: Ocean
+    // The kelp: one mesh, drawn once per stalk on top of the water, with a depth buffer.
+    private let kelpPipeline: MTLRenderPipelineState
+    private let kelpVertices: MTLBuffer
+    private let kelpIndices: MTLBuffer
+    private let kelpIndexCount: Int
+    private let backdropDepth: MTLDepthStencilState
+    private let geometryDepth: MTLDepthStencilState
+    private var depthTexture: MTLTexture?
     /// Draws the sea from above instead of the scene, for checking the waves against footage of a real sea.
     public var showsSeaFromAbove = false
 
@@ -39,10 +47,63 @@ public final class CoveSceneRenderer {
         descriptor.vertexFunction = vertex
         descriptor.fragmentFunction = fragment
         descriptor.colorAttachments[0].pixelFormat = pixelFormat
+        descriptor.depthAttachmentPixelFormat = .depth32Float
         pipeline = try device.makeRenderPipelineState(descriptor: descriptor)
+
+        guard let kelpVertex = library.makeFunction(name: "kelp_vertex") else {
+            throw CoveSceneRendererError.missingShader("kelp_vertex")
+        }
+        guard let kelpFragment = library.makeFunction(name: "kelp_fragment") else {
+            throw CoveSceneRendererError.missingShader("kelp_fragment")
+        }
+        let kelp = MTLRenderPipelineDescriptor()
+        kelp.vertexFunction = kelpVertex
+        kelp.fragmentFunction = kelpFragment
+        kelp.colorAttachments[0].pixelFormat = pixelFormat
+        kelp.depthAttachmentPixelFormat = .depth32Float
+        let layout = MTLVertexDescriptor()
+        layout.attributes[0].format = .float4
+        layout.attributes[0].offset = 0
+        layout.attributes[0].bufferIndex = 0
+        layout.layouts[0].stride = MemoryLayout<SIMD4<Float>>.stride
+        kelp.vertexDescriptor = layout
+        kelpPipeline = try device.makeRenderPipelineState(descriptor: kelp)
+
+        let mesh = KelpMesh.build()
+        guard let vertices = mesh.vertices.withUnsafeBytes({ device.makeBuffer(bytes: $0.baseAddress!, length: $0.count) }),
+              let indices = mesh.indices.withUnsafeBytes({ device.makeBuffer(bytes: $0.baseAddress!, length: $0.count) })
+        else { throw CoveSceneRendererError.cannotCreate("kelp mesh") }
+        kelpVertices = vertices
+        kelpIndices = indices
+        kelpIndexCount = mesh.indices.count
+
+        let backdrop = MTLDepthStencilDescriptor()
+        backdrop.depthCompareFunction = .always
+        backdrop.isDepthWriteEnabled = false
+        let geometry = MTLDepthStencilDescriptor()
+        geometry.depthCompareFunction = .less
+        geometry.isDepthWriteEnabled = true
+        guard let backdropDepth = device.makeDepthStencilState(descriptor: backdrop),
+              let geometryDepth = device.makeDepthStencilState(descriptor: geometry)
+        else { throw CoveSceneRendererError.cannotCreate("depth states") }
+        self.backdropDepth = backdropDepth
+        self.geometryDepth = geometryDepth
+
         guard let queue = device.makeCommandQueue() else { throw CoveSceneRendererError.noCommandQueue }
         self.queue = queue
         ocean = try Ocean(device: device, queue: queue)
+    }
+
+    private func depthTexture(matching texture: MTLTexture) -> MTLTexture? {
+        if let depthTexture, depthTexture.width == texture.width, depthTexture.height == texture.height {
+            return depthTexture
+        }
+        let descriptor = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: .depth32Float, width: texture.width, height: texture.height, mipmapped: false)
+        descriptor.usage = .renderTarget
+        descriptor.storageMode = .private
+        depthTexture = device.makeTexture(descriptor: descriptor)
+        return depthTexture
     }
 
     /// Draws one frame into the layer's next drawable. Does nothing when no drawable is available.
@@ -100,13 +161,43 @@ public final class CoveSceneRenderer {
         pass.colorAttachments[0].texture = texture
         pass.colorAttachments[0].loadAction = .dontCare
         pass.colorAttachments[0].storeAction = .store
+        pass.depthAttachment.texture = depthTexture(matching: texture)
+        pass.depthAttachment.loadAction = .clear
+        pass.depthAttachment.clearDepth = 1
+        pass.depthAttachment.storeAction = .dontCare
         guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: pass) else { return }
         encoder.setRenderPipelineState(pipeline)
+        encoder.setDepthStencilState(backdropDepth)
         encoder.setFragmentBuffer(buffer, offset: 0, index: 0)
         encoder.setFragmentTexture(ocean.displacement, index: 0)
         encoder.setFragmentTexture(ocean.derivatives, index: 1)
         encoder.setFragmentTexture(ocean.curvature, index: 2)
         encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
+
+        if !showsSeaFromAbove, !frame.kelp.isEmpty {
+            var fronds: [SIMD4<Float>] = []
+            for f in frame.kelp {
+                fronds.append(SIMD4(Float(f.baseX), Float(f.baseDepth), Float(f.baseZ), Float(f.length)))
+                fronds.append(SIMD4(Float(f.swayPhase), Float(f.twistPhase), Float(f.bladeSeed), Float(f.bladeScale)))
+            }
+            var uniforms: [SIMD4<Float>] = [
+                SIMD4(Float(texture.width) / Float(texture.height), Float(frame.kelpMotion.surge),
+                      Float(frame.kelpMotion.drift), Float(frame.kelpMotion.flutter)),
+                SIMD4(1 / Float(texture.height), 0, 0, 0),
+            ]
+            let stride = MemoryLayout<SIMD4<Float>>.stride
+            encoder.setRenderPipelineState(kelpPipeline)
+            encoder.setDepthStencilState(geometryDepth)
+            encoder.setCullMode(.none)
+            encoder.setVertexBuffer(kelpVertices, offset: 0, index: 0)
+            encoder.setVertexBytes(&fronds, length: stride * fronds.count, index: 1)
+            encoder.setVertexBytes(&uniforms, length: stride * uniforms.count, index: 2)
+            encoder.setFragmentBytes(&uniforms, length: stride * uniforms.count, index: 0)
+            encoder.setVertexTexture(ocean.displacement, index: 0)
+            encoder.drawIndexedPrimitives(
+                type: .triangle, indexCount: kelpIndexCount, indexType: .uint16, indexBuffer: kelpIndices,
+                indexBufferOffset: 0, instanceCount: frame.kelp.count)
+        }
         encoder.endEncoding()
     }
 }

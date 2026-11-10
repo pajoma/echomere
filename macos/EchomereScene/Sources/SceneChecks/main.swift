@@ -99,8 +99,18 @@ let calls = stride(from: 0.0, to: 2 * hour, by: 1).filter {
 check("an echo calls now and then, not all the time (\(calls) s of calling in two hours)", calls > 0 && calls < 60)
 
 print("The scene itself")
-check("kelp grows up into the view from the seabed below it",
-      !munichBay.layout.kelp.isEmpty && munichBay.layout.kelp.allSatisfy { $0.rootY < 0 && $0.rootY + $0.height > 0.2 })
+check("kelp is rooted below the view and reaches the surface",
+      !munichBay.layout.kelp.isEmpty && munichBay.layout.kelp.allSatisfy {
+          $0.baseDepth > SceneRules.cameraDepth && $0.length > $0.baseDepth && $0.baseZ > 5
+      })
+let sway = Kelp.motion(at: noon), swayLater = Kelp.motion(at: noon + Kelp.surgePeriod / 4)
+var quarter = swayLater.surge - sway.surge
+if quarter < 0 { quarter += 2 * .pi }
+check("kelp sways with the swell (one sway every \(String(format: "%.1f", Kelp.surgePeriod)) s)",
+      abs(quarter - .pi / 2) < 1e-6 && Kelp.surgePeriod > 8 && Kelp.surgePeriod < 10)
+check("kelp sways the same on every screen",
+      munichBay.frame(at: noon, visitors: [], echoes: []).kelpMotion
+          == CoveScene(seed: CoveSeed(9)).frame(at: noon, visitors: [], echoes: []).kelpMotion)
 let frame = munichBay.frame(at: noon, visitors: guests, echoes: traces)
 check("creatures are drawn from far to near",
       zip(frame.creatures, frame.creatures.dropFirst()).allSatisfy { $0.depth >= $1.depth })
