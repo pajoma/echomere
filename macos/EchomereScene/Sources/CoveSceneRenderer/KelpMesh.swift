@@ -7,8 +7,8 @@
 enum KelpMesh {
     static let stalkSegments = 48
     /// Must match `BLADES` in the shader.
-    static let blades = 96
-    static let bladeRows = 7
+    static let blades = 64
+    static let bladeRows = 9
 
     static func build() -> (vertices: [SIMD4<Float>], indices: [UInt16]) {
         var vertices: [SIMD4<Float>] = []

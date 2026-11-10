@@ -438,7 +438,7 @@ enum SceneShaders {
     // Giant kelp as geometry. One mesh (see KelpMesh) is drawn once per stalk; this shader bends the stalk
     // through the water and hangs the blades on it.
 
-    constant float BLADES = 96.0;                         // KelpMesh.blades
+    constant float BLADES = 64.0;                         // KelpMesh.blades
     constant float2 CURRENT = float2(0.80, 0.60);         // the way the current flows (x, z)
     constant float2 SURGE = float2(0.60, 0.80);           // the way the swell pushes the water back and forth
 
@@ -478,7 +478,7 @@ enum SceneShaders {
         xz += SURGE * (0.52 + 0.79 * rise) * pow(rise, 1.2) * sin(u[0].y - 1.0 * s + b.x);
         xz += float2(-CURRENT.y, CURRENT.x) * 0.3 * rise * sin(u[0].z + b.x * 1.7);
         // The stalks of one plant wind loosely around each other.
-        xz += 0.07 * float2(cos(along * 0.35 + b.y), sin(along * 0.35 + b.y)) * smoothstep(0.0, 4.0, along);
+        xz += 0.16 * float2(cos(along * 0.45 + b.y), sin(along * 0.45 + b.y)) * smoothstep(0.0, 3.0, along);
         // The canopy rides the waves.
         y += smoothstep(3.0, 0.5, -y) * heightOf(displacement, xz);
         return float3(xz.x, y, xz.y);
@@ -505,7 +505,7 @@ enum SceneShaders {
             float3 toCamera = normalize(camera - centre);
             float3 side = normalize(cross(tangent, toCamera));
             // Never thinner than about a pixel, so distant stalks don't break up.
-            float width = max(0.035, length(camera - centre) * u[1].x * 0.9);
+            float width = max(0.065, length(camera - centre) * u[1].x * 0.9);
             out.world = centre + side * in.data.z * width;
             out.normal = toCamera;
             out.uv = float2(s, in.data.z);
@@ -518,8 +518,8 @@ enum SceneShaders {
 
             float theta = j * 2.39996 + b.z;
             // Blades hang off the stalk in all directions and stream with the current.
-            float3 direction = float3(cos(theta), -0.35 + 0.6 * (h2 - 0.5), sin(theta)) * 0.55
-                             + float3(CURRENT.x, 0.0, CURRENT.y) * 0.9;
+            float3 direction = float3(cos(theta), 0.1 + 0.5 * (h2 - 0.5), sin(theta)) * 0.9
+                             + float3(CURRENT.x, 0.0, CURRENT.y) * 0.45;
             // Blades trail behind the stalk as the surge moves it.
             float velocity = cos(u[0].y - 1.0 * s + b.x);
             direction -= float3(SURGE.x, 0.0, SURGE.y) * velocity * 0.6 * rise;
@@ -531,12 +531,14 @@ enum SceneShaders {
             normal = cross(turned, direction);
 
             float along = in.data.y;
-            float bladeLength = (0.80 + 0.60 * h2) * b.w;
+            float bladeLength = (1.30 + 1.00 * h2) * b.w;
             float flutter = sin(u[0].w * (h1 < 0.5 ? 1.0 : 2.0) + j * 1.3);
             float3 point = base + direction * bladeLength * along
                          + normal * (0.12 * along * along * flutter + 0.05 * along * sin(along * 9.0 + j))
-                         + float3(0.0, -0.18, 0.0) * along * along * bladeLength;   // the tip droops
-            float halfWidth = 0.115 * b.w * pow(sin(3.14159 * pow(along, 0.55)), 0.8)
+                         // Blades curl: most upwards towards the light, some downwards.
+                         + float3(0.0, h3 < 0.75 ? 0.45 : -0.35, 0.0) * along * along * bladeLength
+                         + turned * 0.25 * bladeLength * along * along * (h1 - 0.5);
+            float halfWidth = 0.150 * b.w * pow(sin(3.14159 * pow(along, 0.50)), 0.9)
                             + 0.022 * exp(-pow(along / 0.06, 2.0));        // the gas bladder at the base
             out.world = point + turned * in.data.z * halfWidth;
             out.normal = normal;
@@ -559,23 +561,23 @@ enum SceneShaders {
 
         float3 c;
         if (in.blade < 0.0) {
-            c = float3(0.045, 0.036, 0.016) * (0.35 + 0.9 * sunlight);
+            c = float3(0.030, 0.026, 0.012) * (0.30 + 0.6 * sunlight);
         } else {
             float lit = saturate(dot(normal, sun));
             // Sunlight shining through a blade towards the camera glows amber, most at the thin edges.
             float behind = saturate(dot(-normal, sun) + 0.25);
             float towards = pow(saturate(dot(-view, sun) * 0.5 + 0.5), 2.0);
             float through = behind * towards * (0.65 + 0.35 * abs(in.uv.y));
-            c = float3(0.110, 0.095, 0.030) * (0.30 + 0.9 * sunlight + 1.4 * lit * sunlight)
-              + float3(0.80, 0.47, 0.10) * through * sunlight * 2.2;
+            c = float3(0.060, 0.055, 0.020) * (0.25 + 0.5 * sunlight + 0.7 * lit * sunlight)
+              + float3(0.80, 0.47, 0.10) * through * sunlight * 1.2;
             c *= 1.0 - 0.30 * smoothstep(0.18, 0.0, abs(in.uv.y));         // the midrib
             c *= 0.92 + 0.08 * sin(in.uv.x * 38.0 + in.blade);              // the wrinkled surface
         }
 
         // The water between the kelp and the camera.
         float y = 1.0 - in.position.y * u[1].x;
-        float3 clear = exp(-distance * float3(0.060, 0.034, 0.027));
-        c = c * clear + water(y) * 0.55 * (1.0 - clear);
+        float3 clear = exp(-distance * float3(0.070, 0.046, 0.040));
+        c = c * clear + water(y) * 0.75 * (1.0 - clear);
         float2 v = float2(in.position.x * u[1].x / u[0].x - 0.5, y - 0.5) * float2(1.0, 0.8);
         c *= 1.0 - 0.35 * dot(v, v);
         return float4(saturate(c), 1.0);

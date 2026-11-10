@@ -72,12 +72,17 @@ public struct CoveLayout: Equatable, Sendable {
         // Giant kelp: a few plants, each a bundle of stalks. They are rooted on the seabed, which slopes away
         // below the view, so the stalks rise into the picture from its bottom edge.
         var fronds: [KelpFrond] = []
-        for plant in 0..<random.int(5, 7) {
-            let z = 7 + 28 * (Double(plant) + random.unit()) / 7
-            let x = random.range(-0.95, 0.95) * z
+        let plants = random.int(9, 12)
+        for plant in 0..<plants {
+            // Plants stand at many distances: the near ones are dark shapes, the far ones fade into the water.
+            let z = 6 + 54 * pow((Double(plant) + random.unit()) / Double(plants), 1.4)
+            // Near plants stand to the left and right, leaving a clearing ahead of the camera for the whales;
+            // far ones stand anywhere.
+            let side = plant % 2 == 0 ? -1.0 : 1.0
+            let x = z < 28 ? side * random.range(0.38, 1.0) * z : random.range(-0.9, 0.9) * z
             let depth = SceneRules.cameraDepth + 2 + 0.36 * z
             let plantPhase = random.angle()
-            for _ in 0..<random.int(3, 5) {
+            for _ in 0..<random.int(2, 4) {
                 fronds.append(KelpFrond(
                     baseX: x + random.range(-0.12, 0.12),
                     baseZ: z + random.range(-0.12, 0.12),
