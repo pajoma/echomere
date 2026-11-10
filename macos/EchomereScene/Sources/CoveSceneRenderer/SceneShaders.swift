@@ -559,13 +559,16 @@ enum SceneShaders {
 
     // MARK: Whales
 
-    // A whale model (see tools/prepare-whales.py): x runs from the flukes (-0.5) to the snout (+0.5), y is up.
-    // The shader swims it: a wave travels down the body and grows towards the flukes.
+    // A whale model (see tools/prepare-whales.py), swum by its own skeleton animation: every vertex follows up
+    // to four joints. The joint matrices put it in the whale's own space, where x runs from the flukes (-0.5)
+    // to the snout (+0.5) and y is up.
 
     struct WhaleIn {
         float3 position [[attribute(0)]];
         float3 normal [[attribute(1)]];
         float2 uv [[attribute(2)]];
+        uint4 joints [[attribute(3)]];
+        float4 weights [[attribute(4)]];
     };
     struct WhaleOut {
         float4 position [[position]];
@@ -576,20 +579,21 @@ enum SceneShaders {
 
     constexpr sampler skinSampler(address::repeat, filter::linear, mip_filter::linear);
 
-    // w[0] position, length · w[1] forward, roll · w[2] tail phase, opacity, effort · w[3] aspect, 1 / picture height
-    // w[4] light direction, intensity · w[5] light colour, ambient
+    // w[0] position, length · w[1] forward, roll · w[2] -, opacity · w[3] aspect, 1 / picture height
+    // w[4] light direction, intensity · w[5] light colour, ambient · from w[6]: three rows per joint
     vertex WhaleOut whale_vertex(WhaleIn in [[stage_in]], constant float4 *w [[buffer(1)]]) {
-        float3 p = in.position;
-        float3 n = in.normal;
-        float along = saturate(0.5 - p.x);                 // 0 at the snout, 1 at the flukes
-        // The tail beats fully when the whale swims hard, and barely moves when it glides.
-        float effort = mix(0.2, 1.0, w[2].z);
-        float amplitude = (0.006 + 0.075 * pow(along, 2.3)) * effort;
-        float wave = w[2].x - 3.4 * along;
-        p.y += amplitude * sin(wave);
-        // The body tilts with the wave, and so do its normals.
-        float slope = -(0.075 * effort * 2.3 * pow(along, 1.3) * sin(wave) - 3.4 * amplitude * cos(wave));
-        n = normalize(float3(n.x - slope * n.y, n.y + slope * n.x, n.z));
+        float4 bind = float4(in.position, 1.0);
+        float4 bindNormal = float4(in.normal, 0.0);
+        float3 p = float3(0.0);
+        float3 n = float3(0.0);
+        for (int i = 0; i < 4; i++) {
+            float weight = in.weights[i];
+            if (weight <= 0.0) continue;
+            int row = 6 + int(in.joints[i]) * 3;
+            p += weight * float3(dot(w[row], bind), dot(w[row + 1], bind), dot(w[row + 2], bind));
+            n += weight * float3(dot(w[row], bindNormal), dot(w[row + 1], bindNormal), dot(w[row + 2], bindNormal));
+        }
+        n = normalize(n);
 
         float3 forward = normalize(w[1].xyz);
         float3 right = normalize(cross(forward, float3(0.0, 1.0, 0.0)));

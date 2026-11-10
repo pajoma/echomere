@@ -253,14 +253,16 @@ public final class CoveSceneRenderer {
                 var data: [SIMD4<Float>] = [
                     SIMD4(SIMD3<Float>(whale.position), Float(whale.length)),
                     SIMD4(SIMD3<Float>(whale.forward), Float(whale.roll)),
-                    SIMD4(Float(whale.tailPhase), Float(whale.opacity), Float(whale.effort), 0),
+                    SIMD4(0, Float(whale.opacity), 0, 0),
                     SIMD4(Float(texture.width) / Float(texture.height), 1 / Float(texture.height), 0, 0),
                     SIMD4(SIMD3<Float>(frame.sky.lightDirection), Float(frame.sky.lightIntensity)),
                     SIMD4(SIMD3<Float>(frame.sky.lightColour), Float(frame.sky.ambient)),
                 ]
+                encoder.setFragmentBytes(&data, length: stride * data.count, index: 1)
+                // The model's own swim animation, at the point of the whale's tail beat.
+                data += model.pose(phase: whale.tailPhase / (2 * .pi), effort: whale.effort)
                 encoder.setVertexBuffer(model.vertices, offset: 0, index: 0)
                 encoder.setVertexBytes(&data, length: stride * data.count, index: 1)
-                encoder.setFragmentBytes(&data, length: stride * data.count, index: 1)
                 encoder.setFragmentTexture(model.skin, index: 0)
                 encoder.drawIndexedPrimitives(
                     type: .triangle, indexCount: model.indexCount, indexType: .uint32, indexBuffer: model.indices,
