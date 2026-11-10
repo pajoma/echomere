@@ -572,17 +572,19 @@ enum SceneShaders {
 
     constexpr sampler skinSampler(address::repeat, filter::linear, mip_filter::linear);
 
-    // w[0] position, length · w[1] forward, roll · w[2] tail phase, opacity · w[3] aspect, 1 / picture height
+    // w[0] position, length · w[1] forward, roll · w[2] tail phase, opacity, effort · w[3] aspect, 1 / picture height
     // w[4] light direction, intensity · w[5] light colour, ambient
     vertex WhaleOut whale_vertex(WhaleIn in [[stage_in]], constant float4 *w [[buffer(1)]]) {
         float3 p = in.position;
         float3 n = in.normal;
         float along = saturate(0.5 - p.x);                 // 0 at the snout, 1 at the flukes
-        float amplitude = 0.006 + 0.075 * pow(along, 2.3);
+        // The tail beats fully when the whale swims hard, and barely moves when it glides.
+        float effort = mix(0.2, 1.0, w[2].z);
+        float amplitude = (0.006 + 0.075 * pow(along, 2.3)) * effort;
         float wave = w[2].x - 3.4 * along;
         p.y += amplitude * sin(wave);
         // The body tilts with the wave, and so do its normals.
-        float slope = -(0.075 * 2.3 * pow(along, 1.3) * sin(wave) - 3.4 * amplitude * cos(wave));
+        float slope = -(0.075 * effort * 2.3 * pow(along, 1.3) * sin(wave) - 3.4 * amplitude * cos(wave));
         n = normalize(float3(n.x - slope * n.y, n.y + slope * n.x, n.z));
 
         float3 forward = normalize(w[1].xyz);

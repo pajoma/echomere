@@ -30,6 +30,8 @@ public struct WhalePose: Equatable, Sendable {
     public let tailPhase: Double
     /// Length in metres.
     public let length: Double
+    /// How hard it swims: 1 beats the tail fully, near 0 it glides.
+    public let effort: Double
     public let opacity: Double
 }
 
@@ -102,17 +104,25 @@ public struct CoveScene: Equatable, Sendable {
     // MARK: - Whales
 
     /// A whale roams the cove on a slow, endless path, unique to this cove and this whale. It swims at about
-    /// walking pace between the seabed and the surface, mostly far from the camera. Only rarely, on a slow
-    /// cycle of its own, does it come to the front.
+    /// walking pace, mostly far from the camera. Only rarely, on a slow cycle of its own, does it come to the
+    /// front. It dives, each time to a different depth, and comes up to the surface to take a series of breaths
+    /// before it dives again.
     struct WhalePath {
         let amplitudeX, periodX, phaseX: Double
         let centreZ, amplitudeZ, periodZ, phaseZ: Double
         let centreY, amplitudeY, periodY, phaseY: Double
         let approachPeriod, approachPhase, nearest: Double
         let tailPeriod, tailPhase: Double
+        let seed: UInt64
+        let breathingCycle, breathingOffset, breathInterval: Double
+        let breaths: Int
+        /// Depth of the whale's middle when its back breaks the surface, in metres.
+        let surfaceDepth: Double
+        let rollPeriod, rollPhase: Double
 
-        init(cove: CoveSeed, creatureID: String) {
-            var random = SplitMix64(seed: combine(cove.value, stableHash(creatureID)))
+        init(cove: CoveSeed, creatureID: String, look: WhaleLook) {
+            seed = combine(cove.value, stableHash(creatureID))
+            var random = SplitMix64(seed: seed)
             amplitudeX = random.range(95, 125)
             periodX = random.range(520, 760)
             phaseX = random.angle()
@@ -129,15 +139,47 @@ public struct CoveScene: Equatable, Sendable {
             nearest = random.range(14, 22)
             tailPeriod = random.range(4.5, 6.5)
             tailPhase = random.angle()
+            let species = look.species
+            breathingCycle = random.range(species.breathingCycle.lowerBound, species.breathingCycle.upperBound)
+            breathingOffset = random.range(0, breathingCycle)
+            breaths = random.int(species.breaths.lowerBound, species.breaths.upperBound)
+            breathInterval = species.breathInterval * random.range(0.85, 1.15)
+            surfaceDepth = 0.085 * look.length
+            rollPeriod = random.range(70, 130)
+            rollPhase = random.angle()
+        }
+
+        /// How close the whale is to its breathing at the surface (1) or to its dive (0), with the depth it
+        /// keeps in each.
+        func breathing(at t: Double) -> (atSurface: Double, surfaceY: Double, diveY: Double) {
+            let cycles = (t + breathingOffset) / breathingCycle
+            let phase = cycles - cycles.rounded(.down)
+            let signed = phase > 0.5 ? phase - 1 : phase            // the surface series is centred on 0
+            let half = Double(breaths) * breathInterval / 2 / breathingCycle
+            let ramp = 45 / breathingCycle                           // going up or down takes about 45 s
+            let atSurface = 1 - Sky.smooth(half, half + ramp, abs(signed))
+
+            // Between breaths the whale dips a little; at each breath its back breaks the surface.
+            let u = min(max((signed + half) / (2 * half), 0), 1)
+            let dip = 0.5 + 0.5 * cos(2 * Double.pi * Double(breaths) * u)
+            let surfaceY = -surfaceDepth * (1 + 2.2 * dip)
+
+            // Each dive goes to its own depth. The dive changes while the whale is at the surface.
+            let dive = UInt64(max((cycles + 0.5).rounded(.down), 0))
+            var random = SplitMix64(seed: combine(seed, dive))
+            let diveCentre = random.range(-22, -10)
+            let diveY = diveCentre + 3.5 * sin(cycle(t, periodY) + phaseY)
+            return (atSurface, surfaceY, diveY)
         }
 
         func position(at t: Double) -> SIMD3<Double> {
             // The visit to the front: 0 for most of the cycle, rising to 1 for a short while.
             let visit = pow(0.5 + 0.5 * sin(cycle(t, approachPeriod) + approachPhase), 90)
             let far = centreZ + amplitudeZ * sin(cycle(t, periodZ) + phaseZ)
+            let breath = breathing(at: t)
             return SIMD3(
                 amplitudeX * (1 - 0.8 * visit) * sin(cycle(t, periodX) + phaseX),
-                centreY + amplitudeY * sin(cycle(t, periodY) + phaseY),
+                breath.diveY + (breath.surfaceY - breath.diveY) * breath.atSurface,
                 far + (nearest - far) * visit)
         }
 
@@ -156,7 +198,7 @@ public struct CoveScene: Equatable, Sendable {
     }
 
     func whalePose(for visitor: Visitor, at t: Double) -> WhalePose {
-        let path = WhalePath(cove: seed, creatureID: visitor.creatureID)
+        let path = WhalePath(cove: seed, creatureID: visitor.creatureID, look: visitor.look)
         let state = path.state(at: t)
         let v = state.velocity, a = state.acceleration
         let speed = max((v * v).sum().squareRoot(), 1e-6)
@@ -168,9 +210,11 @@ public struct CoveScene: Equatable, Sendable {
             species: visitor.look.species,
             position: state.position,
             forward: v / speed,
-            roll: min(max(turnRate * 8, -0.35), 0.35),
+            // It also rolls a little, lazily, as it swims.
+            roll: min(max(turnRate * 8, -0.35), 0.35) + 0.12 * sin(cycle(t, path.rollPeriod) + path.rollPhase),
             tailPhase: wrapAngle(cycle(t, path.tailPeriod) + path.tailPhase),
             length: visitor.look.length,
+            effort: min(max(speed / 0.8, 0.15), 1),
             opacity: min(1, max(0, sinceArrival / SceneRules.whaleFadeIn)))
     }
 
@@ -200,7 +244,7 @@ public struct CoveScene: Equatable, Sendable {
     func echoPose(for echo: Echo, at t: Double) -> EchoPose {
         let left = echo.leftAt.timeIntervalSince1970
         // The echo stays where the whale swam in this cove when it left, as the camera saw it.
-        let place = WhalePath(cove: seed, creatureID: echo.creatureID).state(at: left).position
+        let place = WhalePath(cove: seed, creatureID: echo.creatureID, look: echo.look).state(at: left).position
         let seen = SceneCamera.project(place, aspect: SceneRules.worldWidth)
         let position = (
             x: SceneRules.worldCentreX + ((seen?.x ?? 0.5) - 0.5) * SceneRules.worldWidth,

@@ -93,8 +93,27 @@ check("a whale roams in and out of view (in view \(Int(inViewShare * 100))% of t
 let upFrontShare = Double(upFront) / Double(samples)
 check("a whale comes to the front only rarely (\(String(format: "%.1f", upFrontShare * 100))% of the day)",
       upFront > 0 && upFrontShare < 0.05)
-check("a whale stays between the seabed and the surface (\(Int(-shallowest)) to \(Int(-deepest)) m deep)",
-      shallowest < -3 && deepest > -SceneRules.cameraDepth + 2)
+check("a whale never leaves the water or touches the seabed (\(String(format: "%.1f", -shallowest)) to \(Int(-deepest)) m deep)",
+      shallowest < -0.5 && deepest > -SceneRules.cameraDepth + 2)
+var breathsTaken = 0, surfaceVisits = 0, wasUp = false, lastBreath = -1000.0, deepestDive = 0.0
+for step in stride(from: 0.0, to: 2 * hour, by: 1) {
+    guard let whale = munichBay.frame(at: noon + step, visitors: [guests[0]], echoes: []).whales.first else { continue }
+    let up = whale.position.y > -0.1 * whale.length
+    if up && !wasUp {
+        breathsTaken += 1
+        if step - lastBreath > 120 { surfaceVisits += 1 }
+        lastBreath = step
+    }
+    wasUp = up
+    deepestDive = min(deepestDive, whale.position.y)
+}
+check("a whale comes up to breathe, several breaths at a time (\(breathsTaken) breaths in \(surfaceVisits) visits to the surface in two hours)",
+      surfaceVisits >= 8 && surfaceVisits <= 20 && breathsTaken >= surfaceVisits * 4 && breathsTaken <= surfaceVisits * 6)
+check("between its breaths at the surface a whale dives deep (to \(Int(-deepestDive)) m)", deepestDive < -15)
+let orcaLook = WhaleLook(species: .orca, size: 1), rightWhaleLook = WhaleLook(species: .southernRightWhale, size: 1)
+check("an orca breathes more often than a right whale, with fewer breaths",
+      orcaLook.species.breathingCycle.upperBound < rightWhaleLook.species.breathingCycle.lowerBound
+          && orcaLook.species.breaths.upperBound <= rightWhaleLook.species.breaths.lowerBound)
 check("a whale swims at a whale's pace (at most \(String(format: "%.1f", fastest)) m/s)", fastest < 2)
 let whaleNow = munichBay.frame(at: noon, visitors: guests, echoes: []).whales
 let whaleNext = munichBay.frame(at: noon + 1.0 / 15, visitors: guests, echoes: []).whales

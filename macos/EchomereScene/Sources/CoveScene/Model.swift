@@ -18,6 +18,31 @@ public enum WhaleSpecies: Int, CaseIterable, Hashable, Sendable {
         case .orca: 7.0
         }
     }
+
+    /// How long one cycle of diving and breathing lasts, in seconds. (Shorter than in the wild, where a right
+    /// whale may stay down for 20 minutes, so there is something to see.)
+    public var breathingCycle: ClosedRange<Double> {
+        switch self {
+        case .southernRightWhale: 420...720
+        case .orca: 200...320
+        }
+    }
+
+    /// How many breaths it takes at the surface before it dives again.
+    public var breaths: ClosedRange<Int> {
+        switch self {
+        case .southernRightWhale: 4...6
+        case .orca: 3...4
+        }
+    }
+
+    /// Seconds from one breath to the next.
+    public var breathInterval: Double {
+        switch self {
+        case .southernRightWhale: 20
+        case .orca: 13
+        }
+    }
 }
 
 /// How a whale looks, chosen by its creator from fixed options.
