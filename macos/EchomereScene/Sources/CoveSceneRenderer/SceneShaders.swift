@@ -1,7 +1,7 @@
 /// Metal source for the cove scene, compiled at runtime so the package builds without Xcode.
 ///
 /// The sea is simulated first (an FFT ocean, see `OceanShaders`); then `scene_fragment` draws the picture back to front: water and the surface seen from below, far ridge,
-///    echoes, middle ridge, whales and fish, kelp, near ridge, marine snow, and the light shafts.
+///    echoes, whales and fish, kelp, marine snow, and the light shafts.
 ///    The surface, the shafts and the caustics on the seabed all come from the same wave field, so the
 ///    light moves with the waves.
 ///
@@ -53,18 +53,18 @@ enum SceneShaders {
 
     // MARK: Camera and sea
 
-    // The camera is a few metres below the surface and looks almost level: the underside of the surface
-    // fills the picture above the horizon at 80 % of the screen height.
-    constant float CAMERA_DEPTH = 6.0;
+    // The camera stands on the seabed, about 12 m down, and looks slightly up, like a webcam on the ground:
+    // the underside of the surface fills the picture above the horizon at 55 % of the screen height.
+    constant float CAMERA_DEPTH = 12.0;
     constant float FOCAL = 1.0;
-    constant float PITCH = -0.2915;            // -atan(0.3): puts the horizon at 80 % of the height
-    constant float HORIZON = 0.80;
+    constant float PITCH = -0.0500;            // -atan(0.05): puts the horizon at 55 % of the height
+    constant float HORIZON = 0.55;
     // Sea.cascadeSizes: long swell, wind sea, ripples.
     constant float CASCADE_SIZES[3] = { 211.3, 39.7, 7.43 };
     constant float WATER_IOR = 1.333;
     // Seen this flat, every ray would be totally reflected. The surface is drawn as if the camera looked
     // up more steeply, so the sunlit Snell's window shows at the top of the picture.
-    constant float ELEVATION_STRETCH = 7.0;
+    constant float ELEVATION_STRETCH = 3.0;
     // Snell's window magnifies the waves seen from below; the slopes are gently exaggerated for the shading
     // of the surface only (not for the light focusing).
     constant float SLOPE_GAIN = 1.4;
@@ -98,8 +98,8 @@ enum SceneShaders {
         float3 deep = float3(0.002, 0.015, 0.055);
         float3 middle = float3(0.010, 0.075, 0.210);
         float3 high = float3(0.080, 0.330, 0.640);
-        float3 c = mix(deep, middle, smoothstep(0.0, 0.62, y));
-        return mix(c, high, smoothstep(0.62, 1.0, y));
+        float3 c = mix(deep, middle, smoothstep(0.0, HORIZON - 0.05, y));
+        return mix(c, high, smoothstep(HORIZON - 0.05, 1.0, y));
     }
 
     // How strongly the waves focus sunlight at `depth` metres below surface point `q`: the inverse of how
@@ -211,29 +211,6 @@ enum SceneShaders {
 
     float3 fogged(float3 c, float depth, float y) {
         return mix(c, water(y), saturate(0.12 + 0.78 * depth));
-    }
-
-    // Same formula as TerrainLayer.height(at:).
-    float terrainHeight(constant float4 *d, int layer, float x) {
-        int b = TERRAIN + layer * 4;
-        float4 a = d[b + 1], f = d[b + 2], ph = d[b + 3];
-        return d[b].x + a.x * sin(f.x * x + ph.x) + a.y * sin(f.y * x + ph.y)
-                      + a.z * sin(f.z * x + ph.z) + a.w * sin(f.w * x + ph.w);
-    }
-
-    float3 drawRidge(float3 col, constant float4 *d, int layer, float2 p, float px, SeaTextures sea,
-                     float3 rock, float causticStrength) {
-        float h = terrainHeight(d, layer, p.x);
-        float cover = smoothstep(px, -px, p.y - h);
-        if (cover <= 0.0) return col;
-        float lit = smoothstep(h - 0.10, h, p.y);
-        float3 c = rock * (0.45 + 0.55 * lit);
-        float layerDepth = d[TERRAIN + layer * 4].y;
-        float seabed = 10.0 + 6.0 * layerDepth;
-        float caustic = causticAt(sea, float2(p.x * 6.0, layerDepth * 20.0 + (h - p.y) * 8.0), seabed, false);
-        c += float3(0.06, 0.14, 0.17) * max(caustic - 0.8, 0.0) * causticStrength * lit;
-        c = fogged(c, d[TERRAIN + layer * 4].y, p.y);
-        return mix(col, c, cover);
     }
 
     float4 drawWhale(float2 p, float4 a, float4 b, float4 c, float px) {
@@ -355,13 +332,11 @@ enum SceneShaders {
         float3 ray = viewRay(in.uv, aspect);
         float3 col = surfaceUnderside(sea, ray, p.y);
 
-        col = drawRidge(col, d, 0, p, px, sea, float3(0.020, 0.060, 0.120), 0.2);
 
         for (int i = 0; i < echoCount; i++) {
             col += drawEcho(p, d[ECHOES + i * 2], d[ECHOES + i * 2 + 1], t, i);
         }
 
-        col = drawRidge(col, d, 1, p, px, sea, float3(0.030, 0.070, 0.120), 0.5);
 
         for (int i = 0; i < creatureCount; i++) {
             int b = CREATURES + i * 3;
@@ -375,7 +350,6 @@ enum SceneShaders {
             col = mix(col, k.rgb, k.a);
         }
 
-        col = drawRidge(col, d, 2, p, px, sea, float3(0.060, 0.090, 0.120), 0.8);
 
         // Marine snow, drifting down.
         for (int l = 0; l < 2; l++) {

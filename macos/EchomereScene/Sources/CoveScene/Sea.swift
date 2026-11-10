@@ -5,20 +5,20 @@ import Foundation
 /// repeats seamlessly every `loopPeriod` seconds, so every screen only needs the time within the loop.
 public enum Sea {
     /// Wind speed 10 m above the sea, in m/s.
-    public static let windSpeed = 7.0
+    public static let windSpeed = 11.0
     /// Direction the wind waves travel, in degrees from the x axis (90 is away from the camera).
     public static let windDirection = 118.0
     /// Distance the wind has blown over open water, in metres.
     public static let fetch = 90_000.0
     public static let jonswapGamma = 3.3
     /// Significant height of the swell, in metres.
-    public static let swellHeight = 1.8
+    public static let swellHeight = 2.4
     public static let swellDirection = 94.0
     public static let swellWavelength = 120.0
     /// How narrow the swell's directions are (cos^2s exponent): larger is more long-crested.
     public static let swellSpread = 48.0
     /// How much the crests are sharpened by horizontal displacement.
-    public static let choppiness = 1.25
+    public static let choppiness = 1.45
     /// Waves shorter than about this length (m) are damped.
     public static let shortWaveCut = 0.0012
     /// Patch sizes of the simulation cascades, in metres: long swell, wind sea, ripples.

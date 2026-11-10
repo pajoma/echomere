@@ -80,8 +80,8 @@ public struct CoveLayout: Equatable, Sendable {
                 phases: SIMD4(random.angle(), random.angle(), random.angle(), random.angle()))
         }
 
-        // Kelp grows on the near ridge.
-        let seabed = terrain[2]
+        // Kelp grows on the seabed, which lies below the view: it reaches up into the picture from its bottom
+        // edge.
         var stalks: [KelpStalk] = []
         for _ in 0..<random.int(1, 3) {
             let standX = random.range(0.05, 1.55)
@@ -89,8 +89,8 @@ public struct CoveLayout: Equatable, Sendable {
                 let rootX = standX + random.range(-0.07, 0.07)
                 stalks.append(KelpStalk(
                     rootX: rootX,
-                    rootY: seabed.height(at: rootX) - 0.01,
-                    height: random.range(0.25, 0.62),
+                    rootY: -0.06,
+                    height: random.range(0.30, 0.68),
                     depth: random.range(0.15, 0.45),
                     swayAmplitude: random.range(0.02, 0.05),
                     swayPeriod: random.range(6, 10),

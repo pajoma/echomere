@@ -99,10 +99,8 @@ let calls = stride(from: 0.0, to: 2 * hour, by: 1).filter {
 check("an echo calls now and then, not all the time (\(calls) s of calling in two hours)", calls > 0 && calls < 60)
 
 print("The scene itself")
-let seabed = munichBay.layout.terrain[2]
-check("kelp grows from the seabed",
-      !munichBay.layout.kelp.isEmpty
-          && munichBay.layout.kelp.allSatisfy { abs($0.rootY - (seabed.height(at: $0.rootX) - 0.01)) < 1e-9 })
+check("kelp grows up into the view from the seabed below it",
+      !munichBay.layout.kelp.isEmpty && munichBay.layout.kelp.allSatisfy { $0.rootY < 0 && $0.rootY + $0.height > 0.2 })
 let frame = munichBay.frame(at: noon, visitors: guests, echoes: traces)
 check("creatures are drawn from far to near",
       zip(frame.creatures, frame.creatures.dropFirst()).allSatisfy { $0.depth >= $1.depth })
@@ -129,8 +127,8 @@ if let device = MTLCreateSystemDefaultDevice(), let renderer = try? CoveSceneRen
                          s.cascade, s.heightRMS, s.slopeRMS, s.curvatureRMS))
         }
         let total = stats.map(\.heightRMS).reduce(0) { $0 + $1 * $1 }.squareRoot()
-        check("the sea has waves of a calm, open sea (height RMS \(String(format: "%.2f", total)) m)",
-              total > 0.2 && total < 1.5)
+        check("the sea has the waves of a rough open sea (height RMS \(String(format: "%.2f", total)) m)",
+              total > 0.5 && total < 2.0)
     } else {
         check("the sea can be measured", false)
     }
