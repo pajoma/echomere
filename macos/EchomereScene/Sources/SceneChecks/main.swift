@@ -112,6 +112,30 @@ let largestStep = frame.creatures.compactMap { c in nextByID[c.id].map { hypot(c
 check("creatures move smoothly from one frame to the next", largestStep < 0.01 && nextByID.count == frame.creatures.count)
 check("the scene has ambient life", !frame.fish.isEmpty)
 
+print("The sea")
+let seaNow = Sea.waves(at: noon)
+let seaLater = Sea.waves(at: noon + 1)
+let travelsAtDeepWaterSpeed = zip(seaNow, seaLater).allSatisfy { now, later in
+    let expected = Sea.angularFrequency(wavenumber: now.wavenumber).truncatingRemainder(dividingBy: 2 * .pi)
+    var advanced = (later.phase - now.phase).truncatingRemainder(dividingBy: 2 * .pi)
+    if advanced < 0 { advanced += 2 * .pi }
+    return abs(advanced - expected) < 1e-4
+}
+check("every wave travels at the deep-water speed for its length", travelsAtDeepWaterSpeed)
+let byLength = seaNow.sorted { $0.wavenumber < $1.wavenumber }
+let phaseSpeeds = byLength.map { Sea.angularFrequency(wavenumber: $0.wavenumber) / $0.wavenumber }
+check("long waves travel faster than short ones", zip(phaseSpeeds, phaseSpeeds.dropFirst()).allSatisfy { $0 >= $1 })
+check("every cove has the same sea above it",
+      CoveScene(seed: CoveSeed(1)).frame(at: noon, visitors: [], echoes: []).waves
+          == CoveScene(seed: CoveSeed(2)).frame(at: noon, visitors: [], echoes: []).waves)
+let step = 2 * Double.pi / Sea.patchSize
+check("the sea repeats seamlessly every \(Int(Sea.patchSize)) m, so it can be tiled",
+      seaNow.allSatisfy { w in
+          let m = w.kx / step, n = w.kz / step
+          return abs(m - m.rounded()) < 1e-9 && abs(n - n.rounded()) < 1e-9
+      })
+check("the sea fits the renderer (at most \(Sea.maxWaves) waves)", seaNow.count <= Sea.maxWaves)
+
 print("Rendering")
 if let device = MTLCreateSystemDefaultDevice(), let renderer = try? CoveSceneRenderer(device: device) {
     check("the shaders compile", true)

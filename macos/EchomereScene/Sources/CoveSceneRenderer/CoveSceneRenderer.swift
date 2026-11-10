@@ -18,6 +18,11 @@ public final class CoveSceneRenderer {
     public let pixelFormat: MTLPixelFormat
     private let queue: MTLCommandQueue
     private let pipeline: MTLRenderPipelineState
+    private let wavePipeline: MTLComputePipelineState
+    /// The sea's wave field on one 32 m patch, recomputed every frame: height and slope, and curvature.
+    private let heights: MTLTexture
+    private let curvature: MTLTexture
+    static let waveFieldSize = 256
 
     public init(device: MTLDevice, pixelFormat: MTLPixelFormat = .bgra8Unorm) throws {
         self.device = device
@@ -34,6 +39,21 @@ public final class CoveSceneRenderer {
         descriptor.fragmentFunction = fragment
         descriptor.colorAttachments[0].pixelFormat = pixelFormat
         pipeline = try device.makeRenderPipelineState(descriptor: descriptor)
+        guard let waveFunction = library.makeFunction(name: "wave_field") else {
+            throw CoveSceneRendererError.missingShader("wave_field")
+        }
+        wavePipeline = try device.makeComputePipelineState(function: waveFunction)
+
+        let field = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: .rgba16Float, width: Self.waveFieldSize, height: Self.waveFieldSize, mipmapped: false)
+        field.usage = [.shaderRead, .shaderWrite]
+        field.storageMode = .private
+        guard let heights = device.makeTexture(descriptor: field),
+              let curvature = device.makeTexture(descriptor: field)
+        else { throw CoveSceneRendererError.cannotCreate("wave field textures") }
+        self.heights = heights
+        self.curvature = curvature
+
         guard let queue = device.makeCommandQueue() else { throw CoveSceneRendererError.noCommandQueue }
         self.queue = queue
     }
@@ -80,6 +100,7 @@ public final class CoveSceneRenderer {
     }
 
     private func encode(_ frame: SceneFrame, into texture: MTLTexture, commandBuffer: MTLCommandBuffer) {
+        encodeWaveField(frame.waves, commandBuffer: commandBuffer)
         let data = SceneBuffer.pack(
             frame, aspect: Double(texture.width) / Double(texture.height), pixelsHigh: Double(texture.height))
         guard let buffer = data.withUnsafeBytes({ bytes in
@@ -93,7 +114,24 @@ public final class CoveSceneRenderer {
         guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: pass) else { return }
         encoder.setRenderPipelineState(pipeline)
         encoder.setFragmentBuffer(buffer, offset: 0, index: 0)
+        encoder.setFragmentTexture(heights, index: 0)
+        encoder.setFragmentTexture(curvature, index: 1)
         encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
+        encoder.endEncoding()
+    }
+}
+
+extension CoveSceneRenderer {
+    fileprivate func encodeWaveField(_ waves: [Wave], commandBuffer: MTLCommandBuffer) {
+        guard let encoder = commandBuffer.makeComputeCommandEncoder() else { return }
+        var data = SceneBuffer.packWaves(waves)
+        encoder.setComputePipelineState(wavePipeline)
+        encoder.setTexture(heights, index: 0)
+        encoder.setTexture(curvature, index: 1)
+        encoder.setBytes(&data, length: MemoryLayout<SIMD4<Float>>.stride * data.count, index: 0)
+        let group = MTLSize(width: 16, height: 16, depth: 1)
+        let groups = MTLSize(width: Self.waveFieldSize / 16, height: Self.waveFieldSize / 16, depth: 1)
+        encoder.dispatchThreadgroups(groups, threadsPerThreadgroup: group)
         encoder.endEncoding()
     }
 }
