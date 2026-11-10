@@ -25,6 +25,7 @@ swift run SceneChecks                        # behaviour checks; exits 1 on fail
 swift run ScenePreview                       # a window; space shows another cove, Esc quits
 swift run ScenePreview --speed 20            # time runs 20 times faster
 swift run ScenePreview --snapshot cove.png --seed 7 --at 1794000500 --size 1440x900
+swift run ScenePreview --view above          # the same sea from above, to check the waves
 ```
 
 Other options: `--seed N`, `--whales N` (up to 6), `--echoes N`, `--fps N` (default 15), `--scale X`

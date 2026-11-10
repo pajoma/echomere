@@ -22,6 +22,8 @@ public final class CoveSceneRenderer {
     let queue: MTLCommandQueue
     private let pipeline: MTLRenderPipelineState
     let ocean: Ocean
+    /// Draws the sea from above instead of the scene, for checking the waves against footage of a real sea.
+    public var showsSeaFromAbove = false
 
     public init(device: MTLDevice, pixelFormat: MTLPixelFormat = .bgra8Unorm) throws {
         self.device = device
@@ -88,7 +90,8 @@ public final class CoveSceneRenderer {
         ocean.simulate(seaTime: frame.seaTime, commandBuffer: commandBuffer)
 
         let data = SceneBuffer.pack(
-            frame, aspect: Double(texture.width) / Double(texture.height), pixelsHigh: Double(texture.height))
+            frame, aspect: Double(texture.width) / Double(texture.height), pixelsHigh: Double(texture.height),
+            seaFromAbove: showsSeaFromAbove)
         guard let buffer = data.withUnsafeBytes({ bytes in
             device.makeBuffer(bytes: bytes.baseAddress!, length: bytes.count, options: .storageModeShared)
         }) else { return }

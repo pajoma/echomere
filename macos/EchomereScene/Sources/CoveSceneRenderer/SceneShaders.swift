@@ -53,24 +53,20 @@ enum SceneShaders {
 
     // MARK: Camera and sea
 
-    // The camera stands on the seabed, about 12 m down, and looks slightly up, like a webcam on the ground:
-    // the underside of the surface fills the picture above the horizon at 55 % of the screen height.
+    // The camera stands on the seabed, about 12 m down, and is tilted 25 degrees up, like a webcam on the
+    // ground. It is a real perspective camera (60 degree vertical field of view): the horizon lies near the
+    // bottom edge, and Snell's window, where the sky shows through, fills the top of the picture.
     constant float CAMERA_DEPTH = 12.0;
-    constant float FOCAL = 1.0;
-    constant float PITCH = -0.0500;            // -atan(0.05): puts the horizon at 55 % of the height
-    constant float HORIZON = 0.55;
+    constant float FOCAL = 0.866;
+    constant float PITCH = 0.436;
+    constant float HORIZON = 0.096;            // 0.5 - FOCAL * tan(PITCH)
     // Sea.cascadeSizes: long swell, wind sea, ripples.
     constant float CASCADE_SIZES[3] = { 211.3, 39.7, 7.43 };
     constant float WATER_IOR = 1.333;
-    // Seen this flat, every ray would be totally reflected. The surface is drawn as if the camera looked
-    // up more steeply, so the sunlit Snell's window shows at the top of the picture.
-    constant float ELEVATION_STRETCH = 3.0;
-    // Snell's window magnifies the waves seen from below; the slopes are gently exaggerated for the shading
-    // of the surface only (not for the light focusing).
-    constant float SLOPE_GAIN = 1.4;
+    constant float MAX_WAVE = 3.0;             // no wave rises or dips further than this, in metres
 
-    // The sun stands about 38 degrees high, ahead of the camera, so its light comes through the top of the picture.
-    constant float3 SUN_IN_AIR = float3(0.05, 0.61, 0.79);
+    // The sun stands 35 degrees high, ahead of the camera.
+    constant float3 SUN_IN_AIR = float3(0.10, 0.574, 0.813);
 
     struct SeaTextures {
         texture2d_array<float> displacement;   // per cascade: (Dx, height, Dz, dDx/dz)
@@ -87,6 +83,14 @@ enum SceneShaders {
         return normalize(float3(u, v * cp + FOCAL * sp, FOCAL * cp - v * sp));
     }
 
+    // The same sea seen from 4 m above, looking towards the sun: for checking the waves.
+    float3 viewRayAbove(float2 uv, float aspect) {
+        float u = (uv.x - 0.5) * aspect;
+        float v = uv.y - 0.5;
+        float cp = cos(-0.14), sp = sin(-0.14);
+        return normalize(float3(u, v * cp + FOCAL * sp, FOCAL * cp - v * sp));
+    }
+
     // Direction towards the sun under water (the sunlight bends towards the vertical as it enters).
     float3 sunInWater() {
         float3 down = refract(-normalize(SUN_IN_AIR), float3(0, 1, 0), 1.0 / WATER_IOR);
@@ -97,9 +101,9 @@ enum SceneShaders {
     float3 water(float y) {
         float3 deep = float3(0.002, 0.015, 0.055);
         float3 middle = float3(0.010, 0.075, 0.210);
-        float3 high = float3(0.080, 0.330, 0.640);
-        float3 c = mix(deep, middle, smoothstep(0.0, HORIZON - 0.05, y));
-        return mix(c, high, smoothstep(HORIZON - 0.05, 1.0, y));
+        float3 high = float3(0.030, 0.170, 0.400);
+        float3 c = mix(deep, middle, smoothstep(0.0, 0.30, y));
+        return mix(c, high, smoothstep(0.30, 1.0, y));
     }
 
     // How strongly the waves focus sunlight at `depth` metres below surface point `q`: the inverse of how
@@ -144,42 +148,109 @@ enum SceneShaders {
         return focusAt(sea, q, depth, broad);
     }
 
-    // The underside of the surface. Inside Snell's window the sky and the sun shine through the waves;
-    // outside it the surface is a mirror for the deep water below. Every wave changes where that boundary
-    // falls, so light patches form, travel and break up with the waves.
-    float3 surfaceUnderside(SeaTextures sea, float3 ray, float y) {
-        float3 deep = water(y);
-        if (ray.y <= 0.0) return deep;
-        float2 across = normalize(ray.xz);
-        float elevation = min(asin(ray.y) * ELEVATION_STRETCH, 1.45);
-        float3 incoming = float3(across.x * cos(elevation), sin(elevation), across.y * cos(elevation));
-        float distance = CAMERA_DEPTH / sin(elevation);
-        float2 q = incoming.xz * distance;
-        float2 slope = slopeAt(sea, q, distance) * SLOPE_GAIN;
-        float3 normal = normalize(float3(-slope.x, 1.0, -slope.y));
+    // Height of the long waves at the point x (metres). The choppy crests are waves pushed sideways, so the
+    // sideways push is undone first to find which part of the wave lies above x.
+    float heightAt(SeaTextures sea, float2 x) {
+        float4 d = sea.displacement.sample(seaSampler, x / CASCADE_SIZES[0], 0, level(0.0));
+        return sea.displacement.sample(seaSampler, (x - d.xz) / CASCADE_SIZES[0], 0, level(0.0)).y;
+    }
 
-        // Outside Snell's window the surface mirrors the water below: facets tilted to see the lighter water
-        // just under the surface look brighter than facets that see the dark depth.
-        float3 mirrored = reflect(incoming, -normal);
-        float3 reflected = mix(float3(0.006, 0.045, 0.130), float3(0.040, 0.190, 0.380),
-                               pow(1.0 - saturate(-mirrored.y * 1.6), 2.0));
-        float3 through = refract(incoming, -normal, WATER_IOR);
+    // Where a line of sight meets the waves: the distance along the ray, or a negative value if it never
+    // does. Works from below and from above. The ray is walked through the layer the waves occupy until it
+    // crosses the surface, then the crossing is refined.
+    float surfaceHit(SeaTextures sea, float3 origin, float3 ray) {
+        if (abs(ray.y) < 1e-4) return -1.0;
+        float side = sign(ray.y);
+        float start = max((-MAX_WAVE * side - origin.y) / ray.y, 0.0);
+        float end = min((MAX_WAVE * side - origin.y) / ray.y, 600.0);
+        if (end <= start) return -1.0;
+        const int STEPS = 10;
+        float dt = (end - start) / float(STEPS);
+        float before = start;
+        float gapBefore = side * (origin.y + start * ray.y - heightAt(sea, origin.xz + ray.xz * start));
+        for (int i = 1; i <= STEPS; i++) {
+            float t = start + dt * float(i);
+            float gap = side * (origin.y + t * ray.y - heightAt(sea, origin.xz + ray.xz * t));
+            if (gap > 0.0) {
+                for (int k = 0; k < 2; k++) {               // refine between the last two steps
+                    float middle = before + (t - before) * (-gapBefore / (gap - gapBefore));
+                    float gapMiddle = side * (origin.y + middle * ray.y
+                                              - heightAt(sea, origin.xz + ray.xz * middle));
+                    if (gapMiddle > 0.0) { t = middle; gap = gapMiddle; }
+                    else { before = middle; gapBefore = gapMiddle; }
+                }
+                return before + (t - before) * (-gapBefore / (gap - gapBefore));
+            }
+            before = t;
+            gapBefore = gap;
+        }
+        return end;
+    }
+
+    // The upward normal of the surface above the point x, from all three wave scales.
+    float3 normalAt(SeaTextures sea, float2 x, float distance) {
+        float2 push = sea.displacement.sample(seaSampler, x / CASCADE_SIZES[0], 0, level(0.0)).xz
+                    + sea.displacement.sample(seaSampler, x / CASCADE_SIZES[1], 1, level(0.0)).xz;
+        float2 slope = slopeAt(sea, x - push, distance);
+        return normalize(float3(-slope.x, 1.0, -slope.y));
+    }
+
+    // The sky and the sun, as seen in direction `direction` above the water.
+    float3 sky(float3 direction) {
+        float sunAngle = saturate(dot(direction, normalize(SUN_IN_AIR)));
+        float3 c = mix(float3(0.55, 0.72, 0.95), float3(0.18, 0.38, 0.80), saturate(direction.y));
+        c += float3(1.0, 0.95, 0.85) * (pow(sunAngle, 3000.0) * 60.0 + pow(sunAngle, 200.0) * 3.0
+                                        + pow(sunAngle, 12.0) * 0.5);
+        return c;
+    }
+
+    float3 toneMap(float3 c) { return 1.0 - exp(-c * 0.8); }
+
+    // The underside of the surface, drawn where the line of sight really meets the waves. Inside Snell's
+    // window the sky and the sun shine through; outside it the surface is a mirror for the water below. Every
+    // wave tilts the surface, so the edge of the window, the sun's glitter and the mirrored water all move with
+    // the waves.
+    float3 surfaceUnderside(SeaTextures sea, float3 ray, float y) {
+        float3 body = water(y);
+        if (ray.y <= 0.0) return body;
+        float3 origin = float3(0.0, -CAMERA_DEPTH, 0.0);
+        float t = surfaceHit(sea, origin, ray);
+        if (t < 0.0) return body;
+        float3 hit = origin + ray * t;
+        float3 normal = normalAt(sea, hit.xz, t);
+
+        // The mirror shows the water below: lighter near the surface, dark blue straight down.
+        float3 mirrored = reflect(ray, -normal);
+        float3 reflected = mix(float3(0.004, 0.035, 0.110), float3(0.030, 0.160, 0.340),
+                               pow(1.0 - saturate(-mirrored.y), 3.0));
+        float3 through = refract(ray, -normal, WATER_IOR);
         float3 c;
         if (dot(through, through) < 1e-5) {
             c = reflected;                                  // total internal reflection
         } else {
-            float cosine = saturate(dot(incoming, normal));
             float fresnel = 0.02 + 0.98 * pow(1.0 - saturate(dot(through, normal)), 5.0);
-            float sunAngle = saturate(dot(through, normalize(SUN_IN_AIR)));
-            float3 sky = mix(float3(0.10, 0.30, 0.58), float3(0.30, 0.55, 0.85), saturate(through.y));
-            float3 sun = float3(1.0, 0.97, 0.90) * (pow(sunAngle, 250.0) * 6.0 + pow(sunAngle, 25.0) * 0.8);
-            c = mix(sky + sun, reflected, saturate(fresnel + (1.0 - cosine) * 0.15));
+            c = mix(sky(through), reflected, fresnel);
         }
+        c = toneMap(c);
         // Light reaching the camera through the water turns blue and fades with distance.
-        float3 absorption = exp(-distance * float3(0.11, 0.028, 0.015));
-        c = c * absorption + deep * (1.0 - absorption);
-        float haze = smoothstep(0.0, 0.025, ray.y);
-        return mix(deep, c, haze);
+        float3 clear = exp(-t * float3(0.090, 0.022, 0.012));
+        return c * clear + body * (1.0 - clear);
+    }
+
+    // The sea from above, for checking the waves against footage of a real sea.
+    float3 seaFromAbove(SeaTextures sea, float3 ray) {
+        float3 origin = float3(0.0, 4.0, 0.0);
+        float3 horizon = toneMap(sky(normalize(float3(ray.x, max(ray.y, 0.0) + 0.02, ray.z))));
+        if (ray.y >= 0.0) return horizon;
+        float t = surfaceHit(sea, origin, ray);
+        if (t < 0.0) return horizon;
+        float3 hit = origin + ray * t;
+        float3 normal = normalAt(sea, hit.xz, t);
+        float3 mirrored = reflect(ray, normal);
+        mirrored.y = abs(mirrored.y);
+        float fresnel = 0.02 + 0.98 * pow(1.0 - saturate(dot(-ray, normal)), 5.0);
+        float3 c = toneMap(mix(float3(0.010, 0.060, 0.090), sky(mirrored), fresnel));
+        return mix(horizon, c, exp(-t / 900.0));
     }
 
     // Light shafts: sunlight scattered towards the camera along its line of sight. At every step the light is
@@ -195,8 +266,7 @@ enum SceneShaders {
         float range = ray.y > 0.0 ? min(32.0, (CAMERA_DEPTH - 0.3) / ray.y) : 32.0;
         float dt = range / float(STEPS);
         // A fixed per-pixel offset hides the steps without flickering from frame to frame.
-        float2 cell = floor(pixel);
-        float offset = fract(52.9829189 * fract(0.06711056 * cell.x + 0.00583715 * cell.y));
+        float offset = hash21(floor(pixel));
         float light = 0.0;
         for (int i = 0; i < STEPS; i++) {
             float t = (float(i) + offset) * dt;
@@ -206,7 +276,7 @@ enum SceneShaders {
             float focus = causticAt(sea, point.xz, depth, true);
             light += ((focus - 1.0) * 2.4 + 0.10) * exp(-depth * 0.07) * exp(-t * 0.05) * dt;
         }
-        return float3(0.035, 0.120, 0.220) * 0.45 * max(light, 0.0) * phase;
+        return float3(0.020, 0.085, 0.200) * 0.20 * max(light, 0.0) * min(phase, 6.0);
     }
 
     float3 fogged(float3 c, float depth, float y) {
@@ -330,6 +400,9 @@ enum SceneShaders {
         float2 p = float2(0.8 + (in.uv.x - 0.5) * aspect, in.uv.y);
 
         float3 ray = viewRay(in.uv, aspect);
+        if (d[1].z > 0.5) {
+            return float4(seaFromAbove(sea, viewRayAbove(in.uv, aspect)), 1.0);
+        }
         float3 col = surfaceUnderside(sea, ray, p.y);
 
 

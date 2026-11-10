@@ -22,6 +22,8 @@ struct Options {
     var fps = 15
     var renderScale = 0.5
     var snapshot: String?
+    /// `--view above` shows the sea from above, for checking the waves.
+    var seaFromAbove = false
     var framesDirectory: String?
     var seconds = 10.0
     var at: Date?
@@ -39,6 +41,7 @@ struct Options {
             case "--speed": speed = Double(value) ?? speed
             case "--fps": fps = min(max(Int(value) ?? fps, 1), 60)
             case "--scale": renderScale = min(max(Double(value) ?? renderScale, 0.1), 1)
+            case "--view": seaFromAbove = value == "above"
             case "--snapshot": snapshot = value
             case "--frames": framesDirectory = value
             case "--seconds": seconds = Double(value) ?? seconds
@@ -67,6 +70,8 @@ do {
     FileHandle.standardError.write(Data("Renderer failed: \(error)\n".utf8))
     exit(1)
 }
+
+renderer.showsSeaFromAbove = options.seaFromAbove
 
 if let directory = options.framesDirectory {
     let start = options.at ?? Date()

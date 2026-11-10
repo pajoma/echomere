@@ -17,7 +17,8 @@ public enum SceneBuffer {
     /// - Parameters:
     ///   - aspect: width / height of the target.
     ///   - pixelsHigh: height of the target in pixels, for anti-aliasing.
-    public static func pack(_ frame: SceneFrame, aspect: Double, pixelsHigh: Double) -> [SIMD4<Float>] {
+    public static func pack(_ frame: SceneFrame, aspect: Double, pixelsHigh: Double,
+                            seaFromAbove: Bool = false) -> [SIMD4<Float>] {
         var data = [SIMD4<Float>](repeating: .zero, count: count)
         let creatures = Array(frame.creatures.prefix(maxCreatures))
         let kelp = Array(frame.kelp.prefix(maxKelp))
@@ -26,7 +27,7 @@ public enum SceneBuffer {
         // Shader time runs over one day; Float keeps enough precision for slow motion at that range.
         let shaderTime = frame.time.timeIntervalSince1970.truncatingRemainder(dividingBy: 86_400)
         data[0] = SIMD4(Float(aspect), Float(shaderTime), Float(creatures.count), Float(kelp.count))
-        data[1] = SIMD4(Float(echoes.count), Float(1 / pixelsHigh), 0, 0)
+        data[1] = SIMD4(Float(echoes.count), Float(1 / pixelsHigh), seaFromAbove ? 1 : 0, 0)
 
         for (i, layer) in frame.terrain.prefix(3).enumerated() {
             let b = terrainStart + i * 4
