@@ -184,6 +184,8 @@ public final class CoveSceneRenderer {
                 SIMD4(Float(texture.width) / Float(texture.height), Float(frame.kelpMotion.surge),
                       Float(frame.kelpMotion.drift), Float(frame.kelpMotion.flutter)),
                 SIMD4(1 / Float(texture.height), 0, 0, 0),
+                SIMD4(SIMD3<Float>(frame.sky.lightDirection), Float(frame.sky.lightIntensity)),
+                SIMD4(SIMD3<Float>(frame.sky.lightColour), Float(frame.sky.ambient)),
             ]
             let stride = MemoryLayout<SIMD4<Float>>.stride
             encoder.setRenderPipelineState(kelpPipeline)

@@ -6,7 +6,9 @@ import Foundation
 public enum SceneBuffer {
     static let terrainStart = 2
     static let creatureStart = 14
-    static let kelpStart = 230            // unused since the kelp became 3D geometry
+    static let kelpStart = 230
+    /// The sky: light direction and intensity, light colour and ambient, zenith, horizon.
+    static let skyStart = 230
     static let echoStart = 326
     static let count = 336
 
@@ -42,6 +44,12 @@ public enum SceneBuffer {
             data[b + 1] = SIMD4(Float(c.phase), Float(c.size), Float(c.opacity), Float(c.pattern))
             data[b + 2] = SIMD4(Float(c.colour), c.kind == .whale ? 0 : 1, 0, 0)
         }
+
+        let sky = frame.sky
+        data[skyStart] = SIMD4(SIMD3<Float>(sky.lightDirection), Float(sky.lightIntensity))
+        data[skyStart + 1] = SIMD4(SIMD3<Float>(sky.lightColour), Float(sky.ambient))
+        data[skyStart + 2] = SIMD4(SIMD3<Float>(sky.zenith), 0)
+        data[skyStart + 3] = SIMD4(SIMD3<Float>(sky.horizon), 0)
 
         for (i, e) in echoes.enumerated() {
             let b = echoStart + i * 2

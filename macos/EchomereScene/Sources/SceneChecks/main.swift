@@ -128,6 +128,30 @@ check("every cove has the same sea above it",
       CoveScene(seed: CoveSeed(1)).frame(at: noon, visitors: [], echoes: []).seaTime
           == CoveScene(seed: CoveSeed(2)).frame(at: noon, visitors: [], echoes: []).seaTime)
 
+print("The sky")
+let noonSky = Sky.state(hour: 12), midnightSky = Sky.state(hour: 0)
+check("the sun is up at noon and the moon at midnight",
+      !noonSky.isNight && noonSky.lightDirection.y > 0.8 && midnightSky.isNight && midnightSky.lightDirection.y > 0.6)
+check("the night is darker than the day, but never black",
+      midnightSky.ambient < noonSky.ambient / 2.5 && midnightSky.ambient > 0.2
+          && midnightSky.lightIntensity < noonSky.lightIntensity)
+check("neither sun nor moon shines while it is on the horizon",
+      Sky.state(hour: 6).lightIntensity < 1e-9 && Sky.state(hour: 18).lightIntensity < 1e-9)
+var largestJump = 0.0
+for minute in 0..<(24 * 60) {
+    let a = Sky.state(hour: Double(minute) / 60), b = Sky.state(hour: Double(minute + 1) / 60)
+    largestJump = max(largestJump, abs(a.ambient - b.ambient), abs(a.lightIntensity - b.lightIntensity),
+                      (a.zenith - b.zenith).max(), (a.horizon - b.horizon).max())
+}
+check("the light never jumps: it changes by at most \(String(format: "%.3f", largestJump)) per minute", largestJump < 0.05)
+check("sun and moon stay ahead of the camera, within its lens",
+      stride(from: 0.0, to: 24, by: 0.25).allSatisfy {
+          let d = Sky.state(hour: $0).lightDirection
+          return abs(atan2(d.x, d.z)) <= 41 * Double.pi / 180
+      })
+check("the scene uses the sky of its own time",
+      munichBay.frame(at: noon, visitors: [], echoes: []).sky == Sky.state(at: noon))
+
 print("Rendering")
 if let device = MTLCreateSystemDefaultDevice(), let renderer = try? CoveSceneRenderer(device: device) {
     check("the shaders compile", true)

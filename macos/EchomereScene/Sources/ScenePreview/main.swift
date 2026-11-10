@@ -9,6 +9,8 @@ import QuartzCore
 //   swift run ScenePreview [--seed N] [--whales N] [--echoes N] [--speed X] [--fps N] [--scale X]
 //   swift run ScenePreview --snapshot out.png [--at UNIX_SECONDS] [--size 1600x1000] [--seed N] ...
 //   swift run ScenePreview --frames DIR --seconds N [--fps N] [--at UNIX_SECONDS] [--size WxH] ...
+//   Sky: --hour H shows that hour of the day; --day-seconds N runs a whole day in N seconds, starting at
+//   --hour (the waves and the kelp keep their real speed).
 //     (numbered PNGs; turn them into a clip with:
 //      ffmpeg -framerate 15 -i DIR/frame-%05d.png -pix_fmt yuv420p clip.mp4)
 //
@@ -24,6 +26,17 @@ struct Options {
     var snapshot: String?
     /// `--view above` shows the sea from above, for checking the waves.
     var seaFromAbove = false
+    /// The hour of the day to show, instead of the real one.
+    var hour: Double?
+    /// Runs a whole day in this many seconds.
+    var daySeconds: Double?
+
+    /// The sky to show `elapsed` seconds after the start, or nil for the real sky.
+    func sky(elapsed: Double) -> SkyState? {
+        guard hour != nil || daySeconds != nil else { return nil }
+        let start = hour ?? 5
+        return Sky.state(hour: start + (daySeconds.map { elapsed * 24 / $0 } ?? 0))
+    }
     var framesDirectory: String?
     var seconds = 10.0
     var at: Date?
@@ -42,6 +55,8 @@ struct Options {
             case "--fps": fps = min(max(Int(value) ?? fps, 1), 60)
             case "--scale": renderScale = min(max(Double(value) ?? renderScale, 0.1), 1)
             case "--view": seaFromAbove = value == "above"
+            case "--hour": hour = Double(value)
+            case "--day-seconds": daySeconds = Double(value)
             case "--snapshot": snapshot = value
             case "--frames": framesDirectory = value
             case "--seconds": seconds = Double(value) ?? seconds
@@ -83,8 +98,9 @@ if let directory = options.framesDirectory {
         try FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true)
         for index in 0..<count {
             let time = start.addingTimeInterval(Double(index) / Double(options.fps) * options.speed)
-            let image = try renderer.snapshot(
-                scene.frame(at: time, visitors: visitors, echoes: echoes), width: options.width, height: options.height)
+            var frame = scene.frame(at: time, visitors: visitors, echoes: echoes)
+            if let sky = options.sky(elapsed: Double(index) / Double(options.fps)) { frame.sky = sky }
+            let image = try renderer.snapshot(frame, width: options.width, height: options.height)
             try writePNG(image, to: URL(fileURLWithPath: directory)
                 .appendingPathComponent(String(format: "frame-%05d.png", index)))
         }
@@ -101,7 +117,8 @@ if let path = options.snapshot {
     let scene = CoveScene(seed: CoveSeed(options.seed))
     let visitors = SampleCove.visitors(seed: options.seed, count: options.whales, now: time.addingTimeInterval(-600))
     let echoes = SampleCove.echoes(seed: options.seed, count: options.echoes, now: time)
-    let frame = scene.frame(at: time, visitors: visitors, echoes: echoes)
+    var frame = scene.frame(at: time, visitors: visitors, echoes: echoes)
+    if let sky = options.sky(elapsed: 0) { frame.sky = sky }
     do {
         let image = try renderer.snapshot(frame, width: options.width, height: options.height)
         try writePNG(image, to: URL(fileURLWithPath: path))
@@ -197,7 +214,9 @@ final class SceneView: NSView {
     @objc private func tick(_ link: CADisplayLink) {
         // Stop drawing whenever nothing can see the window.
         guard let window, window.occlusionState.contains(.visible) else { return }
-        renderer.draw(scene.frame(at: now(), visitors: visitors, echoes: echoes), in: metalLayer)
+        var frame = scene.frame(at: now(), visitors: visitors, echoes: echoes)
+        if let sky = options.sky(elapsed: Date().timeIntervalSince(startedAt)) { frame.sky = sky }
+        renderer.draw(frame, in: metalLayer)
     }
 
     override func keyDown(with event: NSEvent) {

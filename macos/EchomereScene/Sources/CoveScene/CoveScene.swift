@@ -42,6 +42,8 @@ public struct SceneFrame: Equatable, Sendable {
     public let echoes: [EchoPose]
     /// The sea surface above the cove at this moment: the time within the sea's loop, in seconds.
     public let seaTime: Double
+    /// The sky above the cove. It can be replaced to look at another time of day.
+    public var sky: SkyState
 
     public var whales: [CreaturePose] { creatures.filter { $0.kind == .whale } }
     public var fish: [CreaturePose] { creatures.filter { $0.kind == .fish } }
@@ -80,7 +82,7 @@ public struct CoveScene: Equatable, Sendable {
         return SceneFrame(
             time: time, terrain: layout.terrain, creatures: creatures, kelp: layout.kelp,
             kelpMotion: Kelp.motion(at: time), echoes: Array(recentEchoes),
-            seaTime: Sea.time(at: time))
+            seaTime: Sea.time(at: time), sky: Sky.state(at: time))
     }
 
     // MARK: - Whales

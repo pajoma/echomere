@@ -26,6 +26,8 @@ swift run ScenePreview                       # a window; space shows another cov
 swift run ScenePreview --speed 20            # time runs 20 times faster
 swift run ScenePreview --snapshot cove.png --seed 7 --at 1794000500 --size 1440x900
 swift run ScenePreview --view above          # the same sea from above, to check the waves
+swift run ScenePreview --hour 21             # the sky at 21 o'clock: the moon is up
+swift run ScenePreview --day-seconds 72      # a whole day in 72 seconds, starting at --hour (default 5)
 ```
 
 Other options: `--seed N`, `--whales N` (up to 6), `--echoes N`, `--fps N` (default 15), `--scale X`

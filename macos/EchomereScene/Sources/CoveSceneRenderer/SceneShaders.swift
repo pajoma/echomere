@@ -65,9 +65,27 @@ enum SceneShaders {
     constant float WATER_IOR = 1.333;
     constant float MAX_WAVE = 3.0;             // no wave rises or dips further than this, in metres
 
-    // A warm, low sun, 22 degrees high, ahead of the camera.
-    constant float3 SUN_IN_AIR = float3(0.10, 0.375, 0.922);
-    constant float3 SUN_COLOUR = float3(1.00, 0.66, 0.30);
+    // The sky at this moment (see Sky.swift): the sun by day, the moon by night.
+    constant int SKY = 230;                    // SceneBuffer.skyStart
+    struct Sky {
+        float3 light;                          // direction towards the sun or the moon, above the water
+        float intensity;
+        float3 colour;
+        float ambient;                         // how bright the water itself is
+        float3 zenith;
+        float3 horizon;
+    };
+
+    Sky skyFrom(float4 light, float4 colour, float4 zenith, float4 horizon) {
+        Sky s;
+        s.light = normalize(light.xyz);
+        s.intensity = light.w;
+        s.colour = colour.rgb;
+        s.ambient = colour.a;
+        s.zenith = zenith.rgb;
+        s.horizon = horizon.rgb;
+        return s;
+    }
 
     struct SeaTextures {
         texture2d_array<float> displacement;   // per cascade: (Dx, height, Dz, dDx/dz)
@@ -92,19 +110,19 @@ enum SceneShaders {
         return normalize(float3(u, v * cp + FOCAL * sp, FOCAL * cp - v * sp));
     }
 
-    // Direction towards the sun under water (the sunlight bends towards the vertical as it enters).
-    float3 sunInWater() {
-        float3 down = refract(-normalize(SUN_IN_AIR), float3(0, 1, 0), 1.0 / WATER_IOR);
+    // Direction towards the light under water (the light bends towards the vertical as it enters).
+    float3 sunInWater(float3 light) {
+        float3 down = refract(-light, float3(0, 1, 0), 1.0 / WATER_IOR);
         return -down;
     }
 
     // The colour of the water itself, deep blue at the bottom, lighter towards the surface.
-    float3 water(float y) {
+    float3 water(float y, float ambient) {
         float3 deep = float3(0.002, 0.015, 0.055);
         float3 middle = float3(0.010, 0.075, 0.210);
         float3 high = float3(0.030, 0.170, 0.400);
         float3 c = mix(deep, middle, smoothstep(0.05, HORIZON + 0.10, y));
-        return mix(c, high, smoothstep(HORIZON + 0.10, 1.0, y));
+        return mix(c, high, smoothstep(HORIZON + 0.10, 1.0, y)) * ambient;
     }
 
     // How strongly the waves focus sunlight at `depth` metres below surface point `q`: the inverse of how
@@ -143,8 +161,8 @@ enum SceneShaders {
     }
 
     // Caustics on something at `depth` metres: the focused light, following the sun's slant to the surface.
-    float causticAt(SeaTextures sea, float2 position, float depth, bool broad) {
-        float3 sun = sunInWater();
+    float causticAt(SeaTextures sea, float3 light, float2 position, float depth, bool broad) {
+        float3 sun = sunInWater(light);
         float2 q = position + sun.xz * (depth / sun.y);
         return focusAt(sea, q, depth, broad);
     }
@@ -199,11 +217,12 @@ enum SceneShaders {
     }
 
     // The sky and the sun, as seen in direction `direction` above the water.
-    float3 sky(float3 direction) {
-        float sunAngle = saturate(dot(direction, normalize(SUN_IN_AIR)));
-        // Evening sky: warm near the horizon and around the sun, blue-grey overhead.
-        float3 c = mix(float3(1.00, 0.60, 0.26), float3(0.50, 0.40, 0.38), pow(saturate(direction.y), 0.7));
-        c += SUN_COLOUR * (pow(sunAngle, 3000.0) * 60.0 + pow(sunAngle, 200.0) * 3.0 + pow(sunAngle, 10.0) * 0.7);
+    float3 skyColour(Sky s, float3 direction) {
+        float towards = saturate(dot(direction, s.light));
+        float3 c = mix(s.horizon, s.zenith, pow(saturate(direction.y), 0.7));
+        // The disc of the sun or the moon, and the glow around it.
+        c += s.colour * s.intensity * (pow(towards, 3000.0) * 60.0 + pow(towards, 200.0) * 3.0
+                                       + pow(towards, 10.0) * 0.7);
         return c;
     }
 
@@ -213,8 +232,8 @@ enum SceneShaders {
     // window the sky and the sun shine through; outside it the surface is a mirror for the water below. Every
     // wave tilts the surface, so the edge of the window, the sun's glitter and the mirrored water all move with
     // the waves.
-    float3 surfaceUnderside(SeaTextures sea, float3 ray, float y) {
-        float3 body = water(y);
+    float3 surfaceUnderside(SeaTextures sea, Sky sky, float3 ray, float y) {
+        float3 body = water(y, sky.ambient);
         if (ray.y <= 0.0) return body;
         float3 origin = float3(0.0, -CAMERA_DEPTH, 0.0);
         float t = surfaceHit(sea, origin, ray);
@@ -225,14 +244,14 @@ enum SceneShaders {
         // The mirror shows the water below: lighter near the surface, dark blue straight down.
         float3 mirrored = reflect(ray, -normal);
         float3 reflected = mix(float3(0.004, 0.035, 0.110), float3(0.030, 0.160, 0.340),
-                               pow(1.0 - saturate(-mirrored.y), 3.0));
+                               pow(1.0 - saturate(-mirrored.y), 3.0)) * sky.ambient;
         float3 through = refract(ray, -normal, WATER_IOR);
         float3 c;
         if (dot(through, through) < 1e-5) {
             c = reflected;                                  // total internal reflection
         } else {
             float fresnel = 0.02 + 0.98 * pow(1.0 - saturate(dot(through, normal)), 5.0);
-            c = mix(sky(through), reflected, fresnel);
+            c = mix(skyColour(sky, through), reflected, fresnel);
         }
         c = toneMap(c);
         // Light reaching the camera through the water turns blue and fades with distance.
@@ -241,9 +260,9 @@ enum SceneShaders {
     }
 
     // The sea from above, for checking the waves against footage of a real sea.
-    float3 seaFromAbove(SeaTextures sea, float3 ray) {
+    float3 seaFromAbove(SeaTextures sea, Sky sky, float3 ray) {
         float3 origin = float3(0.0, 4.0, 0.0);
-        float3 horizon = toneMap(sky(normalize(float3(ray.x, max(ray.y, 0.0) + 0.02, ray.z))));
+        float3 horizon = toneMap(skyColour(sky, normalize(float3(ray.x, max(ray.y, 0.0) + 0.02, ray.z))));
         if (ray.y >= 0.0) return horizon;
         float t = surfaceHit(sea, origin, ray);
         if (t < 0.0) return horizon;
@@ -252,7 +271,7 @@ enum SceneShaders {
         float3 mirrored = reflect(ray, normal);
         mirrored.y = abs(mirrored.y);
         float fresnel = 0.02 + 0.98 * pow(1.0 - saturate(dot(-ray, normal)), 5.0);
-        float3 c = toneMap(mix(float3(0.010, 0.060, 0.090), sky(mirrored), fresnel));
+        float3 c = toneMap(mix(float3(0.010, 0.060, 0.090) * sky.ambient, skyColour(sky, mirrored), fresnel));
         return mix(horizon, c, exp(-t / 900.0));
     }
 
@@ -260,8 +279,8 @@ enum SceneShaders {
     // as bright as the long waves above have focused it, so the shafts sway and flicker with the waves; a shaft
     // is a line through the water along the sunlight, so collecting along the line of sight draws it as a streak.
     // Seawater scatters mostly forwards, so the shafts are strongest when looking towards the sun.
-    float3 lightShafts(SeaTextures sea, float3 ray, float2 pixel, float y) {
-        float3 sun = sunInWater();
+    float3 lightShafts(SeaTextures sea, Sky sky, float3 ray, float2 pixel, float y) {
+        float3 sun = sunInWater(sky.light);
         float g = 0.55;
         float mu = dot(ray, sun);
         float phase = (1.0 - g * g) / pow(1.0 + g * g - 2.0 * g * mu, 1.5);
@@ -276,21 +295,21 @@ enum SceneShaders {
             float3 point = float3(0.0, -CAMERA_DEPTH, 0.0) + ray * t;
             float depth = -point.y;
             if (depth < 0.3) continue;
-            float focus = causticAt(sea, point.xz, depth, true);
+            float focus = causticAt(sea, sky.light, point.xz, depth, true);
             light += ((focus - 1.0) * 1.8 + 0.10) * exp(-depth * 0.07) * exp(-t * 0.05) * dt;
         }
         // Only very few rays reach the deep in the lower third of the picture.
         float reach = mix(0.12, 1.0, smoothstep(0.08, HORIZON + 0.22, y));
         // The light is warm just under the surface and turns blue on its way down.
-        float3 tint = mix(float3(0.030, 0.085, 0.180), float3(0.170, 0.115, 0.060), smoothstep(HORIZON, 1.0, y));
-        return tint * 0.09 * max(light, 0.0) * min(phase, 6.0) * reach;
+        float3 tint = mix(float3(0.030, 0.085, 0.180), sky.colour * 0.17, smoothstep(HORIZON, 1.0, y));
+        return tint * 0.09 * max(light, 0.0) * min(phase, 6.0) * reach * sky.intensity;
     }
 
-    float3 fogged(float3 c, float depth, float y) {
-        return mix(c, water(y), saturate(0.12 + 0.78 * depth));
+    float3 fogged(float3 c, float depth, float y, float ambient) {
+        return mix(c * (0.2 + 0.8 * min(ambient, 1.2)), water(y, ambient), saturate(0.12 + 0.78 * depth));
     }
 
-    float4 drawWhale(float2 p, float4 a, float4 b, float4 c, float px) {
+    float4 drawWhale(float2 p, float4 a, float4 b, float4 c, float px, float ambient) {
         float scale = 0.30 * b.y * (1.15 - 0.65 * a.z);
         float2 q = (p - a.xy) / scale;
         if (abs(q.x) > 0.75 || abs(q.y) > 0.35) return float4(0.0);
@@ -342,10 +361,10 @@ enum SceneShaders {
         col *= mix(1.0, 0.25, smoothstep(0.014, 0.007, length(q - float2(0.80, spine - 0.01))));  // eye
         float mouth = abs(q.y - (spine - 0.035 - 0.05 * (1.0 - u))) ;
         col *= mix(1.0, 0.6, smoothstep(0.006, 0.0, mouth) * smoothstep(0.62, 0.72, u) * step(u, 0.99)); // mouth line
-        return float4(fogged(col, a.z, a.y), alpha);
+        return float4(fogged(col, a.z, a.y, ambient), alpha);
     }
 
-    float4 drawFish(float2 p, float4 a, float4 b, float4 c, float px) {
+    float4 drawFish(float2 p, float4 a, float4 b, float4 c, float px, float ambient) {
         float scale = 0.024 * b.y * (1.15 - 0.6 * a.z);
         float2 q = (p - a.xy) / scale;
         if (abs(q.x) > 1.0 || abs(q.y) > 0.5) return float4(0.0);
@@ -363,7 +382,7 @@ enum SceneShaders {
         float3 gold = float3(0.34, 0.31, 0.19);
         float3 col = mix(silver, gold, saturate(c.x / 3.0));
         col *= 0.7 + 0.5 * saturate(q.y / 0.15 * 0.5 + 0.5);
-        return float4(fogged(col, a.z, a.y), alpha);
+        return float4(fogged(col, a.z, a.y, ambient), alpha);
     }
 
     float3 drawEcho(float2 p, float4 a, float4 b, float t, int i) {
@@ -394,10 +413,11 @@ enum SceneShaders {
         float2 p = float2(0.8 + (in.uv.x - 0.5) * aspect, in.uv.y);
 
         float3 ray = viewRay(in.uv, aspect);
+        Sky sky = skyFrom(d[SKY], d[SKY + 1], d[SKY + 2], d[SKY + 3]);
         if (d[1].z > 0.5) {
-            return float4(seaFromAbove(sea, viewRayAbove(in.uv, aspect)), 1.0);
+            return float4(seaFromAbove(sea, sky, viewRayAbove(in.uv, aspect)), 1.0);
         }
-        float3 col = surfaceUnderside(sea, ray, p.y);
+        float3 col = surfaceUnderside(sea, sky, ray, p.y);
 
 
         for (int i = 0; i < echoCount; i++) {
@@ -408,7 +428,8 @@ enum SceneShaders {
         for (int i = 0; i < creatureCount; i++) {
             int b = CREATURES + i * 3;
             float4 c = d[b + 2];
-            float4 s = c.y < 0.5 ? drawWhale(p, d[b], d[b + 1], c, px) : drawFish(p, d[b], d[b + 1], c, px);
+            float4 s = c.y < 0.5 ? drawWhale(p, d[b], d[b + 1], c, px, sky.ambient)
+                                 : drawFish(p, d[b], d[b + 1], c, px, sky.ambient);
             col = mix(col, s.rgb, s.a);
         }
 
@@ -422,10 +443,10 @@ enum SceneShaders {
             float h = hash21(cell + fl * 17.0);
             float2 off = float2(hash21(cell + 3.1), hash21(cell + 7.7)) - 0.5;
             float m = smoothstep(0.07 + 0.04 * fl, 0.0, length(f - off * 0.6)) * step(0.86, h);
-            col += float3(0.05, 0.07, 0.07) * m * (0.5 + 0.5 * fl);
+            col += float3(0.05, 0.07, 0.07) * m * (0.5 + 0.5 * fl) * (0.3 + 0.7 * min(sky.ambient, 1.0));
         }
 
-        col += lightShafts(sea, ray, in.position.xy, in.uv.y);
+        col += lightShafts(sea, sky, ray, in.position.xy, in.uv.y);
 
         float2 v = (in.uv - 0.5) * float2(1.0, 0.8);
         col *= 1.0 - 0.35 * dot(v, v);
@@ -555,21 +576,22 @@ enum SceneShaders {
         float3 view = toCamera / distance;
         float3 normal = normalize(in.normal);
         if (dot(normal, view) < 0.0) normal = -normal;
-        float3 sun = sunInWater();
+        float3 sun = sunInWater(normalize(u[2].xyz));
         float depth = max(-in.world.y, 0.0);
-        float sunlight = exp(-depth * 0.055);
+        float ambient = u[3].w;
+        float sunlight = exp(-depth * 0.055) * u[2].w;
 
         float3 c;
         if (in.blade < 0.0) {
-            c = float3(0.030, 0.026, 0.012) * (0.30 + 0.6 * sunlight);
+            c = float3(0.030, 0.026, 0.012) * (0.30 * ambient + 0.6 * sunlight);
         } else {
             float lit = saturate(dot(normal, sun));
             // Sunlight shining through a blade towards the camera glows amber, most at the thin edges.
             float behind = saturate(dot(-normal, sun) + 0.25);
             float towards = pow(saturate(dot(-view, sun) * 0.5 + 0.5), 2.0);
             float through = behind * towards * (0.65 + 0.35 * abs(in.uv.y));
-            c = float3(0.060, 0.055, 0.020) * (0.25 + 0.5 * sunlight + 0.7 * lit * sunlight)
-              + float3(0.80, 0.47, 0.10) * through * sunlight * 1.2;
+            c = float3(0.060, 0.055, 0.020) * (0.25 * ambient + 0.5 * sunlight + 0.7 * lit * sunlight)
+              + float3(0.80, 0.62, 0.30) * u[3].rgb * through * sunlight * 1.6;
             c *= 1.0 - 0.30 * smoothstep(0.18, 0.0, abs(in.uv.y));         // the midrib
             c *= 0.92 + 0.08 * sin(in.uv.x * 38.0 + in.blade);              // the wrinkled surface
         }
@@ -577,7 +599,7 @@ enum SceneShaders {
         // The water between the kelp and the camera.
         float y = 1.0 - in.position.y * u[1].x;
         float3 clear = exp(-distance * float3(0.070, 0.046, 0.040));
-        c = c * clear + water(y) * 0.75 * (1.0 - clear);
+        c = c * clear + water(y, ambient) * 0.75 * (1.0 - clear);
         float2 v = float2(in.position.x * u[1].x / u[0].x - 0.5, y - 0.5) * float2(1.0, 0.8);
         c *= 1.0 - 0.35 * dot(v, v);
         return float4(saturate(c), 1.0);
