@@ -42,10 +42,73 @@ enum SceneShaders {
         return float2(c * p.x + s * p.y, -s * p.x + c * p.y);
     }
 
+    // The camera looks slightly up: the underside of the surface fills the top of the picture in
+    // perspective, down to this horizon (in screen height).
+    constant float HORIZON = 0.46;
+    constant float2 SUN = float2(0.86, 1.18);
+
+    // The colour of the water itself, deep blue at the bottom, lighter towards the surface.
     float3 water(float y) {
-        float3 deep = float3(0.004, 0.017, 0.028);
-        float3 shallow = float3(0.022, 0.095, 0.125);
-        return mix(deep, shallow, pow(saturate(y), 1.5));
+        float3 deep = float3(0.003, 0.025, 0.085);
+        float3 middle = float3(0.020, 0.150, 0.360);
+        float3 high = float3(0.090, 0.360, 0.680);
+        float3 c = mix(deep, middle, smoothstep(0.0, HORIZON, y));
+        return mix(c, high, smoothstep(HORIZON, 1.0, y));
+    }
+
+    float valueNoise(float2 p) {
+        float2 i = floor(p);
+        float2 f = fract(p);
+        float2 u = f * f * (3.0 - 2.0 * f);
+        return mix(mix(hash21(i), hash21(i + float2(1, 0)), u.x),
+                   mix(hash21(i + float2(0, 1)), hash21(i + float2(1, 1)), u.x), u.y);
+    }
+
+    float fbm(float2 p) {
+        float v = 0.0, a = 0.5;
+        for (int i = 0; i < 4; i++) {
+            v += a * valueNoise(p);
+            p = float2(p.x * 1.6 - p.y * 1.2, p.x * 1.2 + p.y * 1.6);
+            a *= 0.5;
+        }
+        return v;
+    }
+
+    // The underside of the surface: bright patches where sunlight comes through the waves, separated by
+    // darker, crinkled wave edges, brightest around the sun and fading into haze towards the horizon.
+    float3 surfaceUnderside(float2 p, float t) {
+        float above = p.y - HORIZON;
+        float haze = smoothstep(0.0, 0.30, above);
+        if (above <= 0.0) return water(p.y);
+        float distance = 0.30 / (above + 0.02);
+        float2 s = float2((p.x - SUN.x) * distance, distance * 1.6) * 3.0;
+        float2 drift = float2(t * 0.06, t * 0.04);
+        float2 warp = float2(fbm(s * 0.45 + drift), fbm(s * 0.45 - drift.yx + 5.2));
+        float n = fbm(s + warp * 2.2 + drift);
+        float ridge = 1.0 - abs(fbm(s * 1.9 + warp * 1.6 - drift * 1.3) * 2.0 - 1.0);
+        float patches = smoothstep(0.46, 0.66, n) * (1.0 - 0.65 * smoothstep(0.78, 0.96, ridge));
+        float ripples = smoothstep(0.55, 0.95, ridge);
+
+        float2 toSun = (p - SUN) * float2(0.8, 1.0);
+        float sun = exp(-dot(toSun, toSun) / 0.24);
+
+        float3 c = water(p.y) * (0.82 + 0.25 * ripples);
+        c += float3(0.20, 0.45, 0.75) * patches * (0.18 + 0.9 * sun);
+        c += float3(0.75, 0.90, 1.00) * smoothstep(0.55, 1.0, patches) * sun * 1.5;
+        return mix(water(p.y), c, haze);
+    }
+
+    // Shafts of light fanning out from the sun, soft and many.
+    float3 lightShafts(float2 p, float t) {
+        float2 d = p - SUN;
+        float angle = atan2(d.x, -d.y);
+        float rays = 0.5 + 0.5 * sin(angle * 61.0 + t * 0.05 + 1.5 * sin(angle * 7.0 + t * 0.03));
+        rays *= 0.5 + 0.5 * sin(angle * 37.0 - t * 0.04 + 2.0);
+        rays *= 0.6 + 0.4 * sin(angle * 13.0 + t * 0.02);
+        float reach = exp(-pow(length(d) / 1.35, 2.0));
+        float cone = exp(-angle * angle / 0.45);
+        float belowSurface = mix(1.0, 0.3, smoothstep(HORIZON - 0.05, HORIZON + 0.30, p.y));
+        return float3(0.06, 0.17, 0.30) * rays * reach * cone * belowSurface;
     }
 
     float3 fogged(float3 c, float depth, float y) {
@@ -196,15 +259,15 @@ enum SceneShaders {
         float px = d[1].y;
         float2 p = float2(0.8 + (in.uv.x - 0.5) * aspect, in.uv.y);
 
-        float3 col = water(p.y);
+        float3 col = surfaceUnderside(p, t);
 
-        col = drawRidge(col, d, 0, p, px, t, float3(0.040, 0.060, 0.065), 0.2);
+        col = drawRidge(col, d, 0, p, px, t, float3(0.020, 0.060, 0.120), 0.2);
 
         for (int i = 0; i < echoCount; i++) {
             col += drawEcho(p, d[ECHOES + i * 2], d[ECHOES + i * 2 + 1], t, i);
         }
 
-        col = drawRidge(col, d, 1, p, px, t, float3(0.070, 0.080, 0.075), 0.6);
+        col = drawRidge(col, d, 1, p, px, t, float3(0.030, 0.070, 0.120), 0.5);
 
         for (int i = 0; i < creatureCount; i++) {
             int b = CREATURES + i * 3;
@@ -218,7 +281,7 @@ enum SceneShaders {
             col = mix(col, k.rgb, k.a);
         }
 
-        col = drawRidge(col, d, 2, p, px, t, float3(0.130, 0.120, 0.095), 1.0);
+        col = drawRidge(col, d, 2, p, px, t, float3(0.060, 0.090, 0.120), 0.8);
 
         // Marine snow, drifting down.
         for (int l = 0; l < 2; l++) {
@@ -233,19 +296,10 @@ enum SceneShaders {
             col += float3(0.05, 0.07, 0.07) * m * (0.5 + 0.5 * fl);
         }
 
-        // Light shafts from the surface.
-        float xs = p.x + (1.0 - p.y) * 0.25;
-        float rays = 0.5 + 0.5 * sin(xs * 7.0 + sin(t * 0.05) * 0.8) * sin(xs * 17.0 - t * 0.03 + 1.3);
-        col += float3(0.03, 0.07, 0.08) * pow(saturate(rays), 3.0) * smoothstep(0.2, 1.0, p.y);
-
-        // The surface far above, with light playing through it.
-        float surface = smoothstep(0.90, 0.995, p.y);
-        float ripple = 0.5 + 0.5 * sin(p.x * 38.0 + t * 0.9 + 2.0 * sin(p.x * 9.0 - t * 0.4));
-        ripple *= 0.5 + 0.5 * sin(p.x * 13.0 - t * 0.6);
-        col += float3(0.05, 0.13, 0.15) * surface * (0.4 + 0.8 * ripple);
+        col += lightShafts(p, t);
 
         float2 v = (in.uv - 0.5) * float2(1.0, 0.8);
-        col *= 1.0 - 0.6 * dot(v, v);
+        col *= 1.0 - 0.35 * dot(v, v);
         col += (hash21(in.position.xy) - 0.5) / 255.0;
         return float4(saturate(col), 1.0);
     }

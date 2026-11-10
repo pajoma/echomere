@@ -125,8 +125,8 @@ if let device = MTLCreateSystemDefaultDevice(), let renderer = try? CoveSceneRen
             sum += 0.0722 * Double(firstData[i]) + 0.7152 * Double(firstData[i + 1]) + 0.2126 * Double(firstData[i + 2])
         }
         let brightness = sum / Double(firstData.count / 4) / 255
-        check("the picture is dark but not black (mean brightness \(String(format: "%.3f", brightness)))",
-              brightness > 0.01 && brightness < 0.25)
+        check("the picture is neither black nor washed out (mean brightness \(String(format: "%.3f", brightness)))",
+              brightness > 0.05 && brightness < 0.35)
     } else {
         check("a snapshot can be rendered", false)
     }
