@@ -48,7 +48,7 @@ check("the same cove, visitors, echoes and time give the same frame",
 check("the order the visitors arrive in from the server doesn't change the frame",
       munichBay.frame(at: noon, visitors: guests.reversed(), echoes: traces.reversed())
           == munichBay.frame(at: noon, visitors: guests, echoes: traces))
-check("different coves have different seabeds, kelp and fish",
+check("different coves have different kelp and fish",
       CoveScene(seed: CoveSeed(1)).layout != CoveScene(seed: CoveSeed(2)).layout)
 check("the same whale swims a different path in another cove",
       CoveScene(seed: CoveSeed(1)).frame(at: noon, visitors: [guests[0]], echoes: []).whales
@@ -111,9 +111,79 @@ check("a whale comes up to breathe, several breaths at a time (\(breathsTaken) b
       surfaceVisits >= 8 && surfaceVisits <= 20 && breathsTaken >= surfaceVisits * 4 && breathsTaken <= surfaceVisits * 6)
 check("between its breaths at the surface a whale dives deep (to \(Int(-deepestDive)) m)", deepestDive < -15)
 let orcaLook = WhaleLook(species: .orca, size: 1), rightWhaleLook = WhaleLook(species: .southernRightWhale, size: 1)
-check("an orca breathes more often than a right whale, with fewer breaths",
-      orcaLook.species.breathingCycle.upperBound < rightWhaleLook.species.breathingCycle.lowerBound
-          && orcaLook.species.breaths.upperBound <= rightWhaleLook.species.breaths.lowerBound)
+check("an orca comes up to breathe more often than a right whale",
+      orcaLook.species.breathingCycle.upperBound < rightWhaleLook.species.breathingCycle.lowerBound)
+
+print("Orcas travel as a pod")
+func track(_ id: String, among visitors: [Visitor], from start: Date, seconds: Double, every step: Double) -> [WhalePose] {
+    stride(from: 0.0, to: seconds, by: step).compactMap { t in
+        munichBay.frame(at: start + t, visitors: visitors, echoes: []).whales.first { $0.id == id }
+    }
+}
+func distance(_ a: WhalePose, _ b: WhalePose) -> Double {
+    let d = a.position - b.position
+    return (d * d).sum().squareRoot()
+}
+func speed(of poses: [WhalePose], every step: Double) -> Double {
+    zip(poses, poses.dropFirst()).map { distance($0, $1) / step }.reduce(0, +) / Double(max(poses.count - 1, 1))
+}
+let pod = [
+    visitor("orca-1", arrived: noon - 3 * hour, species: .orca),
+    visitor("orca-2", arrived: noon - 2 * hour, species: .orca),
+    visitor("orca-3", arrived: noon - hour, species: .orca),
+    visitor("right-1", arrived: noon - hour),
+]
+let orca1 = track("orca-1", among: pod, from: noon, seconds: day, every: 120)
+let orca2 = track("orca-2", among: pod, from: noon, seconds: day, every: 120)
+let right1 = track("right-1", among: pod, from: noon, seconds: day, every: 120)
+let furthestApart = zip(orca1, orca2).map(distance).max() ?? 999
+check("orcas visiting together stay together (never more than \(Int(furthestApart)) m apart)", furthestApart < 45)
+check("a right whale goes its own way (up to \(Int(zip(orca1, right1).map(distance).max() ?? 0)) m from the pod)",
+      (zip(orca1, right1).map(distance).max() ?? 0) > 80)
+func breathTimes(_ id: String) -> [Double] {
+    var times: [Double] = [], wasUp = false
+    for t in stride(from: 0.0, to: hour, by: 1) {
+        guard let w = munichBay.frame(at: noon + t, visitors: pod, echoes: []).whales.first(where: { $0.id == id })
+        else { continue }
+        let up = w.position.y > -0.1 * w.length
+        if up && !wasUp { times.append(t) }
+        wasUp = up
+    }
+    return times
+}
+let breaths1 = breathTimes("orca-1"), breaths2 = breathTimes("orca-2")
+let breathGap = zip(breaths1, breaths2).map { abs($0 - $1) }.max() ?? 999
+check("the pod breathes together (within \(Int(breathGap)) s of each other, \(breaths1.count) breaths in an hour)",
+      breaths1.count == breaths2.count && breaths1.count > 40 && breathGap <= 6)
+check("an orca arriving or leaving doesn't move the others",
+      munichBay.frame(at: noon, visitors: pod, echoes: []).whales.first { $0.id == "orca-1" }
+          == munichBay.frame(at: noon, visitors: [pod[0]], echoes: []).whales.first { $0.id == "orca-1" })
+
+print("Pace, day and night")
+// The sky's hour is UTC, and `noon` above is just a fixed moment (21:20 UTC). Take the following day, when
+// all the visitors have arrived.
+let dayStart = noon - Sky.hour(at: noon) * hour + day
+let orcaByDay = speed(of: track("orca-1", among: pod, from: dayStart + 11 * hour, seconds: 2 * hour, every: 10), every: 10)
+let orcaByNight = speed(of: track("orca-1", among: pod, from: dayStart + 23 * hour, seconds: 2 * hour, every: 10), every: 10)
+let rightSpeed = speed(of: track("right-1", among: pod, from: dayStart, seconds: day, every: 60), every: 60)
+let orcaSpeed = speed(of: track("orca-1", among: pod, from: dayStart, seconds: day, every: 60), every: 60)
+check("a right whale swims more slowly than an orca (\(String(format: "%.2f", rightSpeed)) against \(String(format: "%.2f", orcaSpeed)) m/s on average)",
+      rightSpeed < orcaSpeed * 0.75 && rightSpeed > 0.15)
+check("orcas travel more slowly at night (\(String(format: "%.2f", orcaByNight)) against \(String(format: "%.2f", orcaByDay)) m/s by day)",
+      orcaByNight < orcaByDay * 0.9)
+func deepest(_ id: String, from start: Date) -> Double {
+    track(id, among: pod, from: start, seconds: 2 * hour, every: 5).map(\.position.y).min() ?? 0
+}
+check("orcas dive less deep at night (\(Int(-deepest("orca-1", from: dayStart + 23 * hour))) against \(Int(-deepest("orca-1", from: dayStart + 11 * hour))) m by day)",
+      deepest("orca-1", from: dayStart + 23 * hour) > deepest("orca-1", from: dayStart + 11 * hour) + 3)
+let rightWhaleEcho = [echo("e", left: dayStart - hour)]
+func calling(from start: Date) -> Int {
+    stride(from: 0.0, to: 4 * hour, by: 1).filter {
+        munichBay.frame(at: start + $0, visitors: [], echoes: rightWhaleEcho).echoes[0].call != nil
+    }.count
+}
+check("a right whale's echo calls more at night (\(calling(from: dayStart + 22 * hour)) s against \(calling(from: dayStart + 10 * hour)) s in four hours)",
+      calling(from: dayStart + 22 * hour) > calling(from: dayStart + 10 * hour))
 check("a whale swims at a whale's pace (at most \(String(format: "%.1f", fastest)) m/s)", fastest < 2)
 let whaleNow = munichBay.frame(at: noon, visitors: guests, echoes: []).whales
 let whaleNext = munichBay.frame(at: noon + 1.0 / 15, visitors: guests, echoes: []).whales
@@ -140,12 +210,12 @@ check("an echo grows fainter as it ages", fresh > older && older > 0)
 let calls = stride(from: 0.0, to: 2 * hour, by: 1).filter {
     munichBay.frame(at: noon + $0, visitors: [], echoes: [echo("e", left: noon - hour)]).echoes[0].call != nil
 }.count
-check("an echo calls now and then, not all the time (\(calls) s of calling in two hours)", calls > 0 && calls < 60)
+check("an echo calls now and then, not all the time (\(calls) s of calling in two hours)", calls > 0 && calls < 120)
 
 print("The scene itself")
-check("kelp is rooted below the view and reaches the surface",
+check("kelp grows where giant kelp grows: rooted 15 to 30 m down, reaching the surface, under 46 m long",
       !munichBay.layout.kelp.isEmpty && munichBay.layout.kelp.allSatisfy {
-          $0.baseDepth > SceneRules.cameraDepth && $0.length > $0.baseDepth
+          $0.baseDepth >= 15 && $0.baseDepth <= 30 && $0.length > $0.baseDepth && $0.length < 46
       })
 let sway = Kelp.motion(at: noon), swayLater = Kelp.motion(at: noon + Kelp.surgePeriod / 4)
 var quarter = swayLater.surge - sway.surge
@@ -166,7 +236,7 @@ let next = munichBay.frame(at: noon + 1.0 / 15, visitors: guests, echoes: traces
 let nextByID = Dictionary(uniqueKeysWithValues: next.creatures.map { ($0.id, $0) })
 let largestStep = frame.creatures.compactMap { c in nextByID[c.id].map { hypot(c.x - $0.x, c.y - $0.y) } }.max() ?? 1
 check("small fish move smoothly from one frame to the next", largestStep < 0.01 && nextByID.count == frame.creatures.count)
-check("the scene has ambient life", !frame.fish.isEmpty)
+check("the small fish swim in schools of 20 or more", !frame.fish.isEmpty && munichBay.layout.schools.allSatisfy { $0.members.count >= 20 })
 
 print("The sea")
 check("the sea loops seamlessly every \(Int(Sea.loopPeriod)) s",

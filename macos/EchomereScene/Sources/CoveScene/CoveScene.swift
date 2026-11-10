@@ -49,7 +49,6 @@ public struct EchoPose: Equatable, Sendable {
 /// Everything on screen at one moment.
 public struct SceneFrame: Equatable, Sendable {
     public let time: Date
-    public let terrain: [TerrainLayer]
     /// The whales visiting the cove.
     public let whales: [WhalePose]
     /// The small fish of the ambient life, ordered from far to near.
@@ -96,91 +95,146 @@ public struct CoveScene: Equatable, Sendable {
             .map { echoPose(for: $0, at: t) }
 
         return SceneFrame(
-            time: time, terrain: layout.terrain, whales: whales, creatures: creatures, kelp: layout.kelp,
+            time: time, whales: whales, creatures: creatures, kelp: layout.kelp,
             kelpMotion: Kelp.motion(at: time), echoes: Array(recentEchoes),
             seaTime: Sea.time(at: time), sky: Sky.state(at: time))
     }
 
     // MARK: - Whales
 
-    /// A whale roams the cove on a slow, endless path, unique to this cove and this whale. It swims at about
-    /// walking pace, mostly far from the camera. Only rarely, on a slow cycle of its own, does it come to the
-    /// front. It dives, each time to a different depth, and comes up to the surface to take a series of breaths
-    /// before it dives again.
+    /// A whale roams the cove on a slow, endless path. It swims mostly far from the camera and only rarely, on
+    /// a slow cycle, comes to the front. It dives, each time to a different depth, and comes up to the surface
+    /// to take a series of breaths before it dives again.
+    ///
+    /// A right whale has a path and a breathing rhythm of its own. Orcas travel as a pod: every orca in a cove
+    /// follows the cove's one pod route and breathes with the pod, in a place of its own within it.
     struct WhalePath {
-        let amplitudeX, periodX, phaseX: Double
-        let centreZ, amplitudeZ, periodZ, phaseZ: Double
-        let centreY, amplitudeY, periodY, phaseY: Double
-        let approachPeriod, approachPhase, nearest: Double
-        let tailPeriod, tailPhase: Double
-        let seed: UInt64
-        let breathingCycle, breathingOffset, breathInterval: Double
-        let breaths: Int
+        /// Where the whale or its pod goes, and when it breathes.
+        struct Route {
+            let seed: UInt64
+            let amplitudeX, periodX, phaseX: Double
+            let centreZ, amplitudeZ, periodZ, phaseZ: Double
+            let periodY, phaseY: Double
+            let approachPeriod, approachPhase, nearest: Double
+            let breathingCycle, breathingOffset, breathInterval: Double
+            let breaths: Int
+
+            init(seed: UInt64, species: WhaleSpecies) {
+                self.seed = seed
+                var random = SplitMix64(seed: seed)
+                amplitudeX = random.range(95, 125)
+                periodX = random.range(520, 760) / species.pace
+                phaseX = random.angle()
+                centreZ = random.range(62, 76)
+                amplitudeZ = random.range(14, 20)
+                periodZ = random.range(400, 640) / species.pace
+                phaseZ = random.angle()
+                periodY = random.range(240, 420)
+                phaseY = random.angle()
+                approachPeriod = random.range(3600, 7200)
+                approachPhase = random.angle()
+                nearest = random.range(14, 22)
+                breathingCycle = random.range(species.breathingCycle.lowerBound, species.breathingCycle.upperBound)
+                breathingOffset = random.range(0, breathingCycle)
+                breaths = random.int(species.breaths.lowerBound, species.breaths.upperBound)
+                breathInterval = species.breathInterval * random.range(0.9, 1.1)
+            }
+
+            /// Where the route is over the ground (x, z) at a moment.
+            func ground(at t: Double) -> SIMD2<Double> {
+                // The visit to the front: 0 for most of the cycle, rising to 1 for a short while.
+                let visit = pow(0.5 + 0.5 * sin(cycle(t, approachPeriod) + approachPhase), 90)
+                let far = centreZ + amplitudeZ * sin(cycle(t, periodZ) + phaseZ)
+                return SIMD2(amplitudeX * (1 - 0.8 * visit) * sin(cycle(t, periodX) + phaseX),
+                             far + (nearest - far) * visit)
+            }
+        }
+
+        let species: WhaleSpecies
+        let route: Route
+        /// An orca's place in its pod: seconds behind the lead, metres to the side and above or below, and
+        /// seconds after the pod's breath. All zero for a right whale.
+        let behind, beside, above, breathDelay: Double
+        /// A small wander of its own around its place.
+        let wanderPeriod, wanderPhase: Double
         /// Depth of the whale's middle when its back breaks the surface, in metres.
         let surfaceDepth: Double
+        let tailPeriod, tailPhase: Double
         let rollPeriod, rollPhase: Double
 
         init(cove: CoveSeed, creatureID: String, look: WhaleLook) {
-            seed = combine(cove.value, stableHash(creatureID))
-            var random = SplitMix64(seed: seed)
-            amplitudeX = random.range(95, 125)
-            periodX = random.range(520, 760)
-            phaseX = random.angle()
-            centreZ = random.range(62, 76)
-            amplitudeZ = random.range(14, 20)
-            periodZ = random.range(400, 640)
-            phaseZ = random.angle()
-            centreY = random.range(-17, -13)
-            amplitudeY = random.range(5, 8)
-            periodY = random.range(240, 420)
-            phaseY = random.angle()
-            approachPeriod = random.range(3600, 7200)
-            approachPhase = random.angle()
-            nearest = random.range(14, 22)
+            species = look.species
+            let own = combine(cove.value, stableHash(creatureID))
+            var random = SplitMix64(seed: combine(own, 0x9E37))
+            if look.species.travelsInPods {
+                // One route per cove and species, so every orca in the cove shares it.
+                route = Route(seed: combine(cove.value, stableHash("pod-\(look.species.rawValue)")), species: look.species)
+                behind = random.range(0, 30)
+                beside = random.range(-12, 12)
+                above = random.range(-2, 2)
+                breathDelay = random.range(0, 4)
+            } else {
+                route = Route(seed: own, species: look.species)
+                behind = 0; beside = 0; above = 0; breathDelay = 0
+            }
+            wanderPeriod = random.range(50, 90)
+            wanderPhase = random.angle()
+            surfaceDepth = 0.085 * look.length
             tailPeriod = random.range(4.5, 6.5)
             tailPhase = random.angle()
-            let species = look.species
-            breathingCycle = random.range(species.breathingCycle.lowerBound, species.breathingCycle.upperBound)
-            breathingOffset = random.range(0, breathingCycle)
-            breaths = random.int(species.breaths.lowerBound, species.breaths.upperBound)
-            breathInterval = species.breathInterval * random.range(0.85, 1.15)
-            surfaceDepth = 0.085 * look.length
             rollPeriod = random.range(70, 130)
             rollPhase = random.angle()
+        }
+
+        /// Orcas travel more slowly at night than by day: their clock runs 13 % fast at noon and 13 % slow at
+        /// midnight, without ever jumping. Right whales keep the same pace.
+        func travelTime(_ t: Double) -> Double {
+            guard species == .orca else { return t }
+            let day = 86_400.0
+            return t - 0.13 * day / (2 * .pi) * sin(cycle(t, day))
         }
 
         /// How close the whale is to its breathing at the surface (1) or to its dive (0), with the depth it
         /// keeps in each.
         func breathing(at t: Double) -> (atSurface: Double, surfaceY: Double, diveY: Double) {
-            let cycles = (t + breathingOffset) / breathingCycle
+            let cycles = (t - breathDelay + route.breathingOffset) / route.breathingCycle
             let phase = cycles - cycles.rounded(.down)
             let signed = phase > 0.5 ? phase - 1 : phase            // the surface series is centred on 0
-            let half = Double(breaths) * breathInterval / 2 / breathingCycle
-            let ramp = 45 / breathingCycle                           // going up or down takes about 45 s
+            let half = Double(route.breaths) * route.breathInterval / 2 / route.breathingCycle
+            let ramp = min(45, route.breathingCycle * 0.2) / route.breathingCycle   // going up or down
             let atSurface = 1 - Sky.smooth(half, half + ramp, abs(signed))
 
             // Between breaths the whale dips a little; at each breath its back breaks the surface.
             let u = min(max((signed + half) / (2 * half), 0), 1)
-            let dip = 0.5 + 0.5 * cos(2 * Double.pi * Double(breaths) * u)
+            let dip = 0.5 + 0.5 * cos(2 * Double.pi * Double(route.breaths) * u)
             let surfaceY = -surfaceDepth * (1 + 2.2 * dip)
 
             // Each dive goes to its own depth. The dive changes while the whale is at the surface.
             let dive = UInt64(max((cycles + 0.5).rounded(.down), 0))
-            var random = SplitMix64(seed: combine(seed, dive))
-            let diveCentre = random.range(-22, -10)
-            let diveY = diveCentre + 3.5 * sin(cycle(t, periodY) + phaseY)
+            var random = SplitMix64(seed: combine(route.seed, dive))
+            let depth = random.unit()
+            var diveCentre = -22 + 12 * depth
+            if species == .orca {
+                // Orcas dive deep far less often at night.
+                let daylight = Sky.smooth(-6, 10, Sky.sunElevation(hour: Sky.hour(at: Date(timeIntervalSince1970: t))))
+                diveCentre = (-14 + 8 * depth) * (1 - daylight) + diveCentre * daylight
+            }
+            let diveY = diveCentre + above + 3.5 * sin(cycle(t, route.periodY) + route.phaseY)
             return (atSurface, surfaceY, diveY)
         }
 
         func position(at t: Double) -> SIMD3<Double> {
-            // The visit to the front: 0 for most of the cycle, rising to 1 for a short while.
-            let visit = pow(0.5 + 0.5 * sin(cycle(t, approachPeriod) + approachPhase), 90)
-            let far = centreZ + amplitudeZ * sin(cycle(t, periodZ) + phaseZ)
+            let along = travelTime(t) - behind
+            var ground = route.ground(at: along)
+            if beside != 0 {
+                let ahead = route.ground(at: along + 2) - ground
+                let length = max((ahead * ahead).sum().squareRoot(), 1e-6)
+                ground += SIMD2(-ahead.y, ahead.x) / length * beside
+            }
+            let wander = cycle(t, wanderPeriod) + wanderPhase
+            ground += SIMD2(2.5 * sin(wander), 2.5 * sin(wander * 0.7 + 1.3))
             let breath = breathing(at: t)
-            return SIMD3(
-                amplitudeX * (1 - 0.8 * visit) * sin(cycle(t, periodX) + phaseX),
-                breath.diveY + (breath.surfaceY - breath.diveY) * breath.atSurface,
-                far + (nearest - far) * visit)
+            return SIMD3(ground.x, breath.diveY + (breath.surfaceY - breath.diveY) * breath.atSurface, ground.y)
         }
 
         struct State {
@@ -255,13 +309,18 @@ public struct CoveScene: Equatable, Sendable {
         let callOffset = random.range(0, callPeriod)
         let callDuration = 8.0
         let sinceCall = (t - left + callOffset).truncatingRemainder(dividingBy: callPeriod)
+        // Right whales call most at dusk and at night: then the echo calls twice as often.
+        let night = echo.look.species == .southernRightWhale
+            && Sky.sunElevation(hour: Sky.hour(at: Date(timeIntervalSince1970: t))) < 4
+        let secondCall = (t - left + callOffset + callPeriod / 2).truncatingRemainder(dividingBy: callPeriod)
         let width = SceneRules.worldWidth
         return EchoPose(
             x: min(max(position.x, 0.1 * width), 0.9 * width),
             y: position.y,
             depth: position.depth,
             intensity: max(0, 1 - (t - left) / SceneRules.echoLifetime),
-            call: sinceCall < callDuration ? sinceCall / callDuration : nil,
+            call: sinceCall < callDuration ? sinceCall / callDuration
+                : (night && secondCall < callDuration ? secondCall / callDuration : nil),
             size: echo.look.size)
     }
 }

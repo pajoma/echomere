@@ -1,24 +1,5 @@
 import Foundation
 
-/// One ridge of the seabed. Height is a sum of four sine waves over x.
-/// The renderer's shader evaluates the same formula (`terrainHeight`); keep both in step.
-public struct TerrainLayer: Equatable, Sendable {
-    /// 0 is near the camera, 1 is far away.
-    public let depth: Double
-    public let base: Double
-    public let amplitudes: SIMD4<Double>
-    public let frequencies: SIMD4<Double>
-    public let phases: SIMD4<Double>
-
-    public func height(at x: Double) -> Double {
-        var height = base
-        for k in 0..<4 {
-            height += amplitudes[k] * sin(frequencies[k] * x + phases[k])
-        }
-        return height
-    }
-}
-
 public struct FishSchool: Equatable, Sendable {
     public struct Member: Equatable, Sendable {
         public let offsetX: Double
@@ -42,42 +23,23 @@ public struct FishSchool: Equatable, Sendable {
     public let members: [Member]
 }
 
-/// Everything about a cove that is generated once from its seed: seabed, kelp and ambient life.
+/// Everything about a cove that is generated once from its seed: kelp and ambient life.
 public struct CoveLayout: Equatable, Sendable {
-    public let terrain: [TerrainLayer]
     public let kelp: [KelpFrond]
     public let schools: [FishSchool]
 
     public init(seed: CoveSeed) {
         var random = SplitMix64(seed: seed.value)
 
-        // Far, middle and near ridges.
-        let ridges: [(depth: Double, base: Double, amplitude: Double)] = [
-            (0.9, 0.30, 0.08), (0.6, 0.19, 0.06), (0.25, 0.08, 0.04),
-        ]
-        terrain = ridges.map { ridge in
-            TerrainLayer(
-                depth: ridge.depth,
-                base: ridge.base + random.range(-0.03, 0.03),
-                amplitudes: SIMD4(
-                    ridge.amplitude * random.range(0.6, 1.0),
-                    ridge.amplitude * 0.5 * random.range(0.5, 1.0),
-                    ridge.amplitude * 0.25 * random.range(0.5, 1.0),
-                    ridge.amplitude * 0.12 * random.range(0.5, 1.0)),
-                frequencies: SIMD4(
-                    random.range(1.5, 2.5), random.range(4, 6), random.range(9, 13), random.range(20, 28)),
-                phases: SIMD4(random.angle(), random.angle(), random.angle(), random.angle()))
-        }
-
         // Giant kelp, only hinted at in the background: a few plants far from the camera, faint in the haze. They
-        // are rooted on the seabed, which slopes away below the view, so the stalks rise into the picture from
-        // its bottom edge.
+        // are rooted where giant kelp really grows, 25 to 30 m down, on ground that rises gently in the distance;
+        // their roots are lost in the gloom.
         var fronds: [KelpFrond] = []
         let plants = random.int(5, 7)
         for plant in 0..<plants {
             let z = 55 + 45 * (Double(plant) + random.unit()) / Double(plants)
             let x = random.range(-0.95, 0.95) * z
-            let depth = SceneRules.cameraDepth + 2 + 0.36 * z
+            let depth = SceneRules.cameraDepth - 0.1 * (z - 55)
             let plantPhase = random.angle()
             for _ in 0..<random.int(2, 4) {
                 fronds.append(KelpFrond(
@@ -93,7 +55,7 @@ public struct CoveLayout: Equatable, Sendable {
         }
         kelp = fronds
 
-        schools = (0..<random.int(2, 4)).map { _ in
+        schools = (0..<random.int(2, 3)).map { _ in
             FishSchool(
                 // The small fish stay near the camera, in front of the whales and the kelp.
                 depth: random.range(0.05, 0.35),
@@ -107,10 +69,10 @@ public struct CoveLayout: Equatable, Sendable {
                 periodY: random.range(30, 80),
                 phaseX: random.angle(),
                 phaseY: random.angle(),
-                members: (0..<random.int(7, 14)).map { _ in
+                members: (0..<random.int(20, 34)).map { _ in
                     FishSchool.Member(
-                        offsetX: random.range(-0.05, 0.05),
-                        offsetY: random.range(-0.025, 0.025),
+                        offsetX: random.range(-0.10, 0.10),
+                        offsetY: random.range(-0.045, 0.045),
                         wobblePhase: random.angle(),
                         size: random.range(0.85, 1.15))
                 })

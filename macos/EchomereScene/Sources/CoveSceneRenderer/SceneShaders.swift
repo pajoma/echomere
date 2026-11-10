@@ -17,7 +17,6 @@ enum SceneShaders {
     using namespace metal;
 
     // Must match SceneBuffer.
-    constant int TERRAIN = 2;
     constant int CREATURES = 14;
     constant int ECHOES = 326;
 
@@ -58,7 +57,7 @@ enum SceneShaders {
     constant float MAX_WAVE = 3.0;             // no wave rises or dips further than this, in metres
 
     // The sky at this moment (see Sky.swift): the sun by day, the moon by night.
-    constant int SKY = 230;                    // SceneBuffer.skyStart
+    constant int SKY = 2;                      // SceneBuffer.skyStart
     struct Sky {
         float3 light;                          // direction towards the sun or the moon, above the water
         float intensity;
@@ -418,6 +417,7 @@ enum SceneShaders {
         float3 normal;
         float2 uv;                                         // along and across a blade
         float blade;                                       // < 0 for the stalk
+        float lift;                                        // metres above the root
     };
 
     float4 project(float3 world, float aspect) {
@@ -478,6 +478,7 @@ enum SceneShaders {
             out.world = centre + side * in.data.z * width;
             out.normal = toCamera;
             out.uv = float2(s, in.data.z);
+            stalkPoint(a, b, s, u, displacement, rise);
         } else {
             float j = in.data.w;
             float h1 = hash21(float2(j, b.z)), h2 = hash21(float2(j + 17.0, b.z)), h3 = hash21(float2(j + 41.0, b.z));
@@ -513,6 +514,7 @@ enum SceneShaders {
             out.normal = normal;
             out.uv = float2(along, in.data.z);
         }
+        out.lift = rise * (a.y - 0.6);
         out.position = project(out.world, aspect);
         return out;
     }
@@ -547,6 +549,8 @@ enum SceneShaders {
         // The water between the kelp and the camera.
         float y = 1.0 - in.position.y * u[1].x;
         float3 clear = exp(-distance * float3(0.052, 0.040, 0.036));
+        // The roots are lost in the gloom near the seabed.
+        clear *= smoothstep(0.0, 9.0, in.lift);
         c = c * clear + water(y, ambient) * 0.93 * (1.0 - clear);
         float2 v = float2(in.position.x * u[1].x / u[0].x - 0.5, y - 0.5) * float2(1.0, 0.8);
         c *= 1.0 - 0.35 * dot(v, v);

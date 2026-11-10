@@ -19,12 +19,23 @@ public enum WhaleSpecies: Int, CaseIterable, Hashable, Sendable {
         }
     }
 
-    /// How long one cycle of diving and breathing lasts, in seconds. (Shorter than in the wild, where a right
-    /// whale may stay down for 20 minutes, so there is something to see.)
+    /// How long one cycle of diving and breathing lasts, in seconds. Right whales on their nursery grounds
+    /// dive for about ten minutes; orcas make a long dive of two to four minutes.
     public var breathingCycle: ClosedRange<Double> {
         switch self {
         case .southernRightWhale: 420...720
-        case .orca: 200...320
+        case .orca: 150...240
+        }
+    }
+
+    /// Whether whales of this species travel together as a pod.
+    public var travelsInPods: Bool { self == .orca }
+
+    /// How fast it swims compared with an orca. Right whales are slow.
+    public var pace: Double {
+        switch self {
+        case .southernRightWhale: 1 / 1.8
+        case .orca: 1
         }
     }
 
@@ -32,7 +43,7 @@ public enum WhaleSpecies: Int, CaseIterable, Hashable, Sendable {
     public var breaths: ClosedRange<Int> {
         switch self {
         case .southernRightWhale: 4...6
-        case .orca: 3...4
+        case .orca: 3...5
         }
     }
 
@@ -40,7 +51,7 @@ public enum WhaleSpecies: Int, CaseIterable, Hashable, Sendable {
     public var breathInterval: Double {
         switch self {
         case .southernRightWhale: 20
-        case .orca: 13
+        case .orca: 14
         }
     }
 }

@@ -4,16 +4,13 @@ import Foundation
 /// Packs a scene frame into the flat list of float4 values the shader reads.
 /// The layout must match the constants at the top of `SceneShaders.source`.
 public enum SceneBuffer {
-    static let terrainStart = 2
-    static let creatureStart = 14
-    static let kelpStart = 230
     /// The sky: light direction and intensity, light colour and ambient, zenith, horizon.
-    static let skyStart = 230
+    static let skyStart = 2
+    static let creatureStart = 14
     static let echoStart = 326
     static let count = 336
 
-    static let maxCreatures = (kelpStart - creatureStart) / 3
-    static let maxKelp = (echoStart - kelpStart) / 2
+    static let maxCreatures = (echoStart - creatureStart) / 3
     static let maxEchoes = (count - echoStart) / 2
 
     /// - Parameters:
@@ -29,14 +26,6 @@ public enum SceneBuffer {
         let shaderTime = frame.time.timeIntervalSince1970.truncatingRemainder(dividingBy: 86_400)
         data[0] = SIMD4(Float(aspect), Float(shaderTime), Float(creatures.count), 0)
         data[1] = SIMD4(Float(echoes.count), Float(1 / pixelsHigh), seaFromAbove ? 1 : 0, 0)
-
-        for (i, layer) in frame.terrain.prefix(3).enumerated() {
-            let b = terrainStart + i * 4
-            data[b] = SIMD4(Float(layer.base), Float(layer.depth), 0, 0)
-            data[b + 1] = SIMD4<Float>(layer.amplitudes)
-            data[b + 2] = SIMD4<Float>(layer.frequencies)
-            data[b + 3] = SIMD4<Float>(layer.phases)
-        }
 
         for (i, c) in creatures.enumerated() {
             let b = creatureStart + i * 3
