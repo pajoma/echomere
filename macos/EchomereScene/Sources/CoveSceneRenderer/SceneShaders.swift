@@ -1,9 +1,9 @@
 /// Metal source for the cove scene, compiled at runtime so the package builds without Xcode.
 ///
-/// The sea is simulated first (an FFT ocean, see `OceanShaders`); then `scene_fragment` draws the picture back to front: water and the surface seen from below, far ridge,
-///    echoes, whales and fish, kelp, marine snow, and the light shafts.
-///    The surface, the shafts and the caustics on the seabed all come from the same wave field, so the
-///    light moves with the waves.
+/// The sea is simulated first (an FFT ocean, see `OceanShaders`); then `scene_fragment` draws the picture
+/// back to front: the water and the surface seen from below, echoes, whales and fish, kelp, marine snow, and
+/// the light shafts. The surface, the shafts and the caustics on the kelp all come from the same wave field,
+/// so the light moves with the waves.
 ///
 ///
 /// The optics (refraction through the wave normal, Snell's window, total internal reflection, and caustics
