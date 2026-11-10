@@ -6,28 +6,17 @@ A meditative deep-sea screensaver where anonymous creatures travel from cove to 
 
 *You step away from your desk, and the screen goes quiet and blue.*
 
-*Light ripples down from a surface far above. Kelp sways. Small fish drift past. Somewhere in the dim water, a
-whale you have never seen glides through your cove. It came from a town you may never visit, sent by someone
-you will never meet. It stays a day, and then it moves on.*
+*Light ripples down from a surface far above. Kelp sways. Small fish drift past. Somewhere in the dim water, a whale you have never seen glides through your cove. It came from a town you may never visit, sent by someone you will never meet. It stays a day, and then it moves on.*
 
-*Somewhere else, your own whale is swimming too. You let it go on the first day, and it has been travelling
-ever since, from cove to cove, across seas it takes days to cross. Now and then a quiet line tells you where it
-is: near Porto, day 43. Now and then bubbles rise on your screen, and the name of a faraway bay fades in and
-out: someone there watched your whale for a while and wanted you to know.*
+*Somewhere else, your own whale is swimming too. You let it go on the first day, and it has been travelling ever since, from cove to cove, across seas it takes days to cross. Now and then a quiet line tells you where it is: near Porto, day 43. Now and then bubbles rise on your screen, and the name of a faraway bay fades in and out: someone there watched your whale for a while and wanted you to know.*
 
-*No names, no messages, no likes to count. Only the slow passing of whales, and the faint echoes they leave
-behind.*
+*No names, no messages, no likes to count. Only the slow passing of whales, and the faint echoes they leave behind.*
 
 ---
 
 ## What it is
 
-Echomere is a screensaver that looks into the deep sea, realistic, dark and slow, and uses hardly any energy.
-Each creator sends one whale on an endless trip. A cove is a town, shared by every creator who lives there,
-and every screen in it looks into the same water, like a webcam below the surface. A whale stays one day at
-each stop, leaves an echo when it moves on, and collects gestures (Bubbles, Song, Light) from the people who
-watched it. There are no accounts, no names, no free text and no moderation. Your whale might come home one
-day, but only by chance.
+Echomere is a screensaver that looks into the deep sea, realistic, dark and slow, and uses hardly any energy. Each creator sends one whale on an endless trip. A cove is a town, shared by every creator who lives there, and every screen in it looks into the same water, like a webcam below the surface. A whale stays one day at each stop, leaves an echo when it moves on, and collects gestures (Bubbles, Song, Light) from the people who watched it. There are no accounts, no names, no free text and no moderation. Your whale might come home one day, but only by chance.
 
 ## Status
 
@@ -39,8 +28,7 @@ Design phase. There's no code yet.
 - [docs/vision/grilling.md](docs/vision/grilling.md): the vision interview and the confirmed summary
 - [Issue #2](https://github.com/pajoma/echomere/issues/2): the version 1 spec
 
-Version 1 is planned as a native macOS screensaver, a small web page for setup, travel logs and gestures,
-and a backend on Cloudflare Workers with D1 in an EU region.
+Version 1 is planned as a native macOS screensaver, a small web page for setup, travel logs and gestures, and a backend on Cloudflare Workers with D1 in an EU region.
 
 ## Contributing
 
@@ -50,5 +38,5 @@ Work happens on feature branches and reaches `develop` through pull requests. `m
 
 [MIT](LICENSE).
 
-Town data will come from [GeoNames](https://www.geonames.org/), licensed under
-[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
+Town data will come from [GeoNames](https://www.geonames.org/), licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
+
