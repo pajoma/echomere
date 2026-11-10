@@ -4,7 +4,7 @@ A meditative deep-sea screensaver where anonymous creatures travel from cove to 
 
 ---
 
-*Light ripples down from a surface far above. Kelp sways. Small fish drift past. Somewhere in the dim water, a whale you have never seen glides through your cove. It came from a place you may never visit, sent by someone you will never meet. It stays a day, and then it moves on.*
+*Light ripples down from a surface far above. Kelp sways. Small fish drift past. Somewhere in the dim water, a whale you have never seen glides through your cove. It came from a place you may never visit, sent by someone you will never meet.*
 
 ---
 
