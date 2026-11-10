@@ -44,16 +44,16 @@ enum SceneShaders {
 
     // The camera looks slightly up: the underside of the surface fills the top of the picture in
     // perspective, down to this horizon (in screen height).
-    constant float HORIZON = 0.46;
-    constant float2 SUN = float2(0.86, 1.18);
+    constant float HORIZON = 0.80;
+    constant float2 SUN = float2(0.86, 1.10);
 
     // The colour of the water itself, deep blue at the bottom, lighter towards the surface.
     float3 water(float y) {
-        float3 deep = float3(0.003, 0.025, 0.085);
-        float3 middle = float3(0.020, 0.150, 0.360);
-        float3 high = float3(0.090, 0.360, 0.680);
-        float3 c = mix(deep, middle, smoothstep(0.0, HORIZON, y));
-        return mix(c, high, smoothstep(HORIZON, 1.0, y));
+        float3 deep = float3(0.002, 0.015, 0.055);
+        float3 middle = float3(0.010, 0.075, 0.210);
+        float3 high = float3(0.080, 0.330, 0.640);
+        float3 c = mix(deep, middle, smoothstep(0.0, 0.62, y));
+        return mix(c, high, smoothstep(0.62, 1.0, y));
     }
 
     float valueNoise(float2 p) {
@@ -77,10 +77,11 @@ enum SceneShaders {
     // The underside of the surface: bright patches where sunlight comes through the waves, separated by
     // darker, crinkled wave edges, brightest around the sun and fading into haze towards the horizon.
     float3 surfaceUnderside(float2 p, float t) {
-        float above = p.y - HORIZON;
-        float haze = smoothstep(0.0, 0.30, above);
+        // How far up the surface band this pixel is, 0 at the horizon and 1 at the top edge.
+        float above = (p.y - HORIZON) / (1.0 - HORIZON);
+        float haze = smoothstep(0.0, 0.55, above);
         if (above <= 0.0) return water(p.y);
-        float distance = 0.30 / (above + 0.02);
+        float distance = 0.30 / (above * 0.54 + 0.02);
         float2 s = float2((p.x - SUN.x) * distance, distance * 1.6) * 3.0;
         float2 drift = float2(t * 0.06, t * 0.04);
         float2 warp = float2(fbm(s * 0.45 + drift), fbm(s * 0.45 - drift.yx + 5.2));
@@ -89,7 +90,7 @@ enum SceneShaders {
         float patches = smoothstep(0.46, 0.66, n) * (1.0 - 0.65 * smoothstep(0.78, 0.96, ridge));
         float ripples = smoothstep(0.55, 0.95, ridge);
 
-        float2 toSun = (p - SUN) * float2(0.8, 1.0);
+        float2 toSun = (p - SUN) * float2(0.8, 2.2);
         float sun = exp(-dot(toSun, toSun) / 0.24);
 
         float3 c = water(p.y) * (0.82 + 0.25 * ripples);
@@ -105,10 +106,11 @@ enum SceneShaders {
         float rays = 0.5 + 0.5 * sin(angle * 61.0 + t * 0.05 + 1.5 * sin(angle * 7.0 + t * 0.03));
         rays *= 0.5 + 0.5 * sin(angle * 37.0 - t * 0.04 + 2.0);
         rays *= 0.6 + 0.4 * sin(angle * 13.0 + t * 0.02);
-        float reach = exp(-pow(length(d) / 1.35, 2.0));
-        float cone = exp(-angle * angle / 0.45);
-        float belowSurface = mix(1.0, 0.3, smoothstep(HORIZON - 0.05, HORIZON + 0.30, p.y));
-        return float3(0.06, 0.17, 0.30) * rays * reach * cone * belowSurface;
+        // The rays reach all the way down to the seabed, fading only slowly with depth.
+        float reach = mix(0.45, 1.0, exp(-pow(length(d) / 0.9, 2.0)));
+        float cone = exp(-angle * angle / 0.30);
+        float belowSurface = mix(1.0, 0.35, smoothstep(HORIZON - 0.05, 1.0, p.y));
+        return float3(0.05, 0.15, 0.28) * rays * reach * cone * belowSurface;
     }
 
     float3 fogged(float3 c, float depth, float y) {
