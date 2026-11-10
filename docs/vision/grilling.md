@@ -684,20 +684,255 @@ The creator's screen shows at most one gesture effect per hour, picking the most
 the gesture reaches the creator, not the home cove. it is in the creatures travel log. if he gets 30 gestures, than this is great and desired
 
 
+## Round 8: Review findings
+
+An architecture review of the summary above (Brooks-Lint, 2026-11-10) found gaps that would shape the data
+model. These questions close them. The summary stays unconfirmed until this round is answered, and I'll
+update it afterwards.
+
+### Q41: Is every town a cove, or only towns where creators live?
+
+There's one whale per creator, and a cove holds 5 whales. Many creators share a cove: "Munich Bay" might be
+home to 400 of them, so at most 5 of those 400 whales can ever be there at once. The summary doesn't say
+whether a town with no creators is a cove.
+
+- (a) Every town on the list (GeoNames, more than about 15,000 inhabitants, around 30,000 worldwide) is a
+  cove, watched or not. There's plenty of room, but most stops happen where nobody watches.
+- (b) Only towns where at least one creator lives are coves. Every stop is watched, but dense regions are
+  always full, and most whales wait in the deep sea, where nobody sees them.
+- (c) Every town is a cove, but a whale prefers a **watched** cove (one with creators) as its next stop. It
+  goes to an unwatched one only when the watched neighbours are full. The travel log calls that stop "a
+  quiet cove".
+
+➡️ (c). The sea never jams, most whales stay visible, and quiet coves replace "abandoned coves" as the
+overflow. The deep sea stays for long crossings.
+
+**Answer:**
+c is good
+
+---
+
+### Q42: Shared scene, private overlay?
+
+Every screen in a cove shows the same scene, like a webcam. But some things are for one creator only: the
+line "your whale: near Porto, day 43" and the gestures their own whale received.
+
+➡️ Yes, two layers. The **cove scene** is the same on every screen in that cove: terrain, ambient life,
+visiting whales and echoes. On top of it, each screen draws its **creator's overlay**, which only that
+screen shows: the home line, gesture replays, and the short code for sending a gesture.
+
+**Answer:**
+yes
+---
+
+### Q43: How literal is the webcam?
+
+- (a) Same place, same visitors, but each screen moves its whales its own way. Two screens side by side look
+  different.
+- (b) Exactly the same picture: every screen computes the scene from the cove, the visitors and the current
+  time, so two screens side by side show the same whale in the same spot. Nothing is streamed, so it doesn't
+  cost extra energy.
+
+➡️ (b). It keeps the webcam promise, and anyone who checks it with two laptops will find it true.
+
+**Answer:**
+a, the webcam is just an analogy, we  need to limit server load. Or can come up with an algorithm which makes location deterministic, depending on the time and a location seed? 
+
+---
+
+### Q44: How often do gestures show on the creator's screen?
+
+You welcomed many gestures (Q40), but the screen should stay calm. 30 gestures replayed "a few times" each
+means about 90 effects a day.
+
+➡️ Gestures are bundled per stop: all gestures from Munich Bay become one effect, with bubbles, song and
+light mixed according to what came in, and the cove name fading in. At most one effect every 30 minutes,
+and each stop's bundle shows up to 3 times during the day it was received. The travel log still counts
+every single gesture.
+
+**Answer:**
+90 effect a days is fine, max 1 effect per minute
+---
+
+### Q45: How often can one person send a gesture?
+
+The short code is visible to anyone who sees the screen, and there are no accounts. One photo posted
+online would let anyone flood a creator's travel log.
+
+➡️ One gesture per code, per browser and per hour. Extra taps quietly do nothing. The limit is held on the
+server, without storing who sent what.
+
+**Answer:**
+is fine
+---
+
+### Q46: Does the town lookup happen only in the browser?
+
+To suggest the nearest town, either the browser sends its position to the server (which breaks "only the
+cove leaves the device"), or the web page loads the whole town list and finds the nearest one itself
+(around 1–2 MB, loaded once and cached).
+
+Fact: GeoNames is licensed CC BY 4.0, so the web page and the README must credit it.
+
+➡️ The browser does it. The town list is a static file on the web page, and coordinates never leave the
+device.
+
+**Answer:**
+fine
+---
+
+### Q47: What does an echo look like, and how long does it last?
+
+➡️ An echo is a faint shimmer, plus a distant call now and then, in the place where the whale swam. It
+fades over 7 days. A cove shows at most its 5 most recent echoes, so a busy cove doesn't fill up with them.
+The travel log notes "left an echo in Munich Bay".
+
+**Answer:**
+fine
+---
+
+### Q48: What happens when the key is lost?
+
+Q15 suggested exporting the key as a backup file, but the summary dropped it. Without a backup, a reinstall
+loses the whale for good.
+
+- (a) That's intended: the whale is lost at sea, and the creator starts a new one.
+- (b) The web page offers a backup: download the key as a small file, or save the bookmark somewhere safe.
+  A lost key still means a lost whale.
+
+➡️ (b). It costs almost nothing, and losing a whale you've followed for months to a laptop swap would feel
+cruel.
+
+**Answer:**
+b
+---
+
+### Q49: How do we keep the macOS screensaver from wasting energy?
+
+Research (2026-11-10, with sources) found that third-party `.saver` bundles on Sonoma, Sequoia and Tahoe keep
+running and drawing after the screensaver is dismissed, and every start adds another copy. Apple has
+acknowledged this and announced no fix. `stopAnimation` isn't called in normal use. On Tahoe, secondary
+displays don't work with third-party screensavers at all.
+(developer.apple.com/forums/thread/738547, /thread/787444; github.com/JohnCoates/Aerial/issues/1396)
+
+Open-source screensavers such as Aerial work around it: they listen for the system's "screensaver will
+stop" signal and quit their own process. That mostly works, but on Tahoe it wasn't always reliable.
+
+- (a) Build a normal `.saver` bundle with these workarounds, starting from the open-source template
+  ScreenSaverMinimal, and measure its energy use on Sonoma, Sequoia and Tahoe before committing to it.
+- (b) Skip the `.saver` system: a small app of our own notices when the Mac is idle and shows the scene full
+  screen itself. We control when it stops, but it doesn't appear under System Settings › Screen Saver, and
+  it's one more app to install and run.
+- (c) (a) first, and switch to (b) if the measurements show it still leaks.
+
+➡️ (c). Build a throwaway prototype first that only measures energy use. ADR 2 waits for the result.
+
+**Answer:**
+c is good
+---
+
+### Q50: Where does the screensaver keep the secret key?
+
+Every third-party screensaver shares one storage container on the Mac, so another installed screensaver
+could read a key stored there as a plain file. Nobody has documented whether the macOS Keychain works from
+inside a screensaver.
+
+What the key protects: viewing your own whale's travel log and changing your cove, traits and look. It
+doesn't touch money or private messages, and coordinates are never stored.
+
+➡️ Use the Keychain if the prototype from Q49 shows it works. Otherwise use the shared container and accept
+the risk, given what the key protects. Either way, the backup from Q48 stays possible.
+
+**Answer:**
+fine
+## Round 9: Following up on Round 8
+
+What Round 8 settled:
+
+- Every town on the list is a cove. Whales prefer **watched coves** and go to **quiet coves** only when the
+  watched ones nearby are full (now in `GLOSSARY.md`, replacing "abandoned cove").
+- Each screen draws the shared cove scene and, on top of it, its own creator's overlay.
+- Up to about 90 gesture effects a day are fine, at most one per minute.
+- Gestures are limited to one per code, per browser and per hour. The town lookup happens only in the
+  browser, and GeoNames gets credited.
+- An echo fades over 7 days, and a cove shows at most 5. The web page offers a key backup.
+- macOS: a `.saver` prototype that measures energy comes first, with our own idle app as the fallback. The
+  key goes in the Keychain if that works, and in the shared container if not.
+
+### Q51 (follows up on Q43): Is your idea the same as (b)?
+
+You chose (a) to keep server load low, and asked about a deterministic algorithm based on time and a
+location seed. That algorithm is (b): every screen computes where each whale is from the cove's seed, the
+list of visitors and the clock. The server only says once a day who is visiting. Nothing is streamed, so the
+server load is the same as with (a), and two screens side by side show the same picture.
+
+➡️ Yes: deterministic from the cove seed, the visitors and the time, with no extra server load.
+
+**Answer:**
+if possible, yes
+---
+
+### Q52 (follows up on Q44): Does each gesture get its own effect?
+
+"Max 1 effect per minute" sounds like you don't want gestures bundled per stop.
+
+➡️ Yes. Each gesture is its own small effect, with the cove name fading in, shown up to 3 times on the day it
+arrives and at most one effect per minute. If more arrive than fit, the oldest drop off the screen but stay
+in the travel log.
+
+**Answer:**
+yes, 
+---
+
+### Q53: When does a cove count as quiet?
+
+➡️ When no screen in that cove has checked in for 7 days. It's watched again as soon as one screen checks in.
+
+**Answer:**
+yes
+---
+
+### Q54: Where does a new whale start when its home cove is full?
+
+Example: 400 creators live in Munich, and Munich Bay already holds 5 whales.
+
+- (a) It starts in the deep sea and arrives in Munich Bay as soon as there's room.
+- (b) It starts in the nearest watched cove that has room.
+- (c) It always spends its first day at home, even if that puts a sixth whale in the cove. After that the
+  normal rules apply.
+
+➡️ (c). A creator should see their new whale at least once, and a sixth whale for one day doesn't jam
+anything.
+
+**Answer:**
+c, the first day is only local
+---
+
+### Q55: When is a trip a deep-sea crossing, and how long does it take?
+
+Now that every town is a cove, neighbours on land are close. Long crossings happen mostly over the sea, to
+islands and between continents.
+
+➡️ If the next cove is more than 500 km away, the whale crosses the deep sea first: one day for every 1,000
+km, at least one day. If all 8 nearest coves (watched and quiet) are full, it waits one day in the deep sea
+and then tries again.
+
+**Answer:**
+we have time, no need to rush
+
 ## Summary: what we agreed
 
-Round 7 settled the rest: a screen is like a webcam on its cove, so many people watch the same visitor. Coves
-are the nearest town from a public list. The deep sea covers both long crossings and waiting when everything
-is full. Every gesture reaches the creator, and many gestures are welcome.
+Rounds 1–7 set the vision. Rounds 8 and 9 closed the gaps an architecture review found: which towns are
+coves, what every screen shares, how often gestures show, and how the macOS screensaver stays frugal.
 
-**Please check this summary.** Correct anything that's wrong. Once you confirm, the grilling is done.
+**Please check this summary.** Correct anything that's wrong. Once you confirm, the grilling is done. Two of
+your answers I've interpreted; they're marked *(interpreted)*.
 
 ### Vision
 
-Echomere is a meditative deep-sea screensaver. Each person creates one whale and sends it on an
-endless trip through coves around the world. People who never meet are connected through the whales that
-visit them, the way strangers are in Death Stranding. There are no accounts, no names, no free text and no
-moderation.
+Echomere is a meditative deep-sea screensaver. Each person creates one whale and sends it on an endless trip
+from cove to cove around the world. People who never meet are connected through the whales that visit them,
+the way strangers are in Death Stranding. There are no accounts, no names, no free text and no moderation.
 
 ### People and their creature
 
@@ -705,61 +940,85 @@ moderation.
 - A creator is anonymous: what others see is their **cove** (a town) and 2 or 3 traits picked from a fixed
   list. The whale's look comes from fixed options too. Nothing anyone types ever reaches another screen.
 - Ownership is a secret key on the device. A bookmarked link with the key in the URL fragment opens the web
-  page. There are no logins.
+  page. There are no logins. The web page offers a backup of the key, as a file or a saved bookmark; a lost
+  key still means a lost whale.
 - A creature lives independently of its creator. It keeps its home cove and keeps travelling even when the
   creator stops looking.
 
 ### Coves and screens
 
-- A **cove** is a town from a public list (GeoNames, more than about 15,000 inhabitants) with an oceanic name:
-  "Munich Bay", "Rosenheim Strait". The browser suggests the nearest one, and the creator can pick another.
-  Only the cove leaves the device, never coordinates.
-- Many creators share a cove. Every screen whose home is that cove shows the same scene, **like a webcam**.
-- A cove holds up to **5 whales**. **Ambient life** fills the scene.
-- At home, a quiet line now and then says where your own whale is ("near Porto, day 43").
+- **Every town** on a public list (GeoNames, more than about 15,000 inhabitants) is a **cove**, with an
+  oceanic name: "Munich Bay", "Rosenheim Strait". The browser loads the list and suggests the nearest town
+  itself, and the creator can pick another. Only the cove leaves the device, never coordinates. GeoNames is
+  credited on the web page and in the README.
+- A **watched cove** has at least one creator still looking. A cove becomes **quiet** when no screen in it
+  has checked in for 7 days, and it's watched again as soon as one does.
+- Many creators share a cove. A cove holds up to **5 whales**. **Ambient life** fills the scene.
+- Each screen draws two layers:
+  - the **cove scene**, the same on every screen in that cove: terrain, flora, ambient life, visiting whales
+    and echoes. Each screen computes it from the cove's seed, the list of visitors and the clock, so two
+    screens side by side show the same picture (if that turns out to be possible). The server only says once
+    a day who is visiting; nothing is streamed.
+  - the **creator's overlay**, which only that screen shows: the quiet line about where your own whale is
+    ("near Porto, day 43"), gesture effects, and the short code for sending a gesture to the current visitor.
 
 ### Trips
 
 - A **trip** never ends. Each stop lasts exactly 24 hours, however long anyone's screensaver runs.
-- The next stop is a random **neighbour**: one of the 8 nearest coves with room, skipping the last 5
-  visited. When those are full, abandoned coves count too. When even they are full, or the next cove is far
-  away, the whale is in the **deep sea**, where nobody can see it.
+- A new whale spends its first day at home, but only on its creator's screen, in the overlay. It doesn't take
+  one of the cove's 5 places. *(interpreted from "the first day is only local")*
+- The next stop is a random **neighbour**: one of the 8 nearest coves with room, skipping the last 5 visited.
+  Watched coves come first; quiet coves count only when the watched ones nearby are full. The travel log
+  calls such a stop "a quiet cove".
+- If the next cove is more than 500 km away, the whale first crosses the **deep sea**: one day for every
+  1,000 km, at least one day. If all 8 nearest coves are full, it waits a day in the deep sea and tries again.
+  Nobody can see the deep sea. Slow, long crossings are fine. *(interpreted from "we have time, no need to
+  rush")*
 - A whale comes home only by chance.
-- After a whale moves on, it leaves an **echo** in the cove it left.
+- After a whale moves on, it leaves an **echo** in the cove it left: a faint shimmer and a distant call now
+  and then. It fades over 7 days, and a cove shows at most its 5 most recent echoes.
 
 ### Gestures and travel logs
 
 - There are three **gestures**: Bubbles, Song and Light. Anyone watching a visitor sends them from the web
-  page. The screensaver always shows a short code (such as `whales.example/k7m2`) that's valid only during
-  this stop.
-- Every gesture reaches the creature's **creator**. It's recorded in the **travel log** and shown on the
-  creator's screen while the screensaver runs. Each gesture is replayed a few times during the same day, so
-  the creator has a real chance to see it, but never so often that the screen gets busy.
-- The travel log lists coves, days in the deep sea and the gestures received. The creator can see it, and so
-  can anyone watching while the whale visits.
+  page, using the short code the screensaver shows (such as `echomere.example/k7m2`), valid only during this
+  stop. Each browser can send one gesture per code per hour; the server enforces this without storing who
+  sent what.
+- Every gesture reaches the creature's **creator** and is recorded in the **travel log**. On the creator's
+  screen, each gesture is its own small effect with the cove name fading in. It's shown up to 3 times on the
+  day it arrives, at most one effect per minute. If more arrive than fit, the oldest drop off the screen but
+  stay in the log.
+- The travel log lists coves, quiet coves, days in the deep sea, echoes left and the gestures received. The
+  creator can see it, and so can anyone watching while the whale visits.
 
 ### Look of the scene
 
 - Realistic, not cartoonish or artsy, and always with low energy use in mind.
 - A webcam placed below the surface: you still see the water surface above, with light playing through it.
-- Each cove's scene is generated once, when the cove is created: terrain, flora such as kelp, and small
-  animals (**ambient life**), so there's always some movement on screen. Every screen in that cove shows the
-  same scene.
+- Each cove's scene is generated from its seed: terrain, flora such as kelp, and small animals (**ambient
+  life**), so there's always some movement on screen.
 
 ### Technology and project
 
-- The scene is a native renderer, macOS first. It's dark, slow and low frame rate, and it pauses when
-  nothing is showing it, so it uses hardly any energy.
-- A small web page handles setup (cove, traits, look), travel logs and gestures.
+- The scene is a native renderer, macOS first. It's dark, slow and low frame rate, and it stops when nothing
+  is showing it, so it uses hardly any energy.
+- Third-party `.saver` bundles on current macOS keep running after the screensaver is dismissed. So the first
+  step is a throwaway prototype: a `.saver` that quits its own process when the screensaver stops, with its
+  energy use measured on Sonoma, Sequoia and Tahoe. If it still leaks, a small idle app of our own shows the
+  scene instead. The secret key goes in the Keychain if the prototype shows that works, otherwise in the
+  screensaver's shared storage.
+- A small web page handles setup (cove, traits, look), the key backup, travel logs and gestures.
 - The backend is Cloudflare Workers with D1 in an EU region, small enough for anyone to self-host. Clients
-  check in rarely.
+  check in rarely. Trip and scene logic take the time and a random seed as inputs, so they can be tested
+  without waiting days.
 - It's a hobby project under the MIT licence. It ships unsigned first, and is signed and notarized once
   strangers install it.
 
 ### Version 1
 
-- **In**: the macOS screensaver, whales only, the web page, the Cloudflare backend, trips, neighbours, the
-  deep sea, echoes, three gestures, cove names
+- **In**: the macOS screensaver (after the energy prototype), whales only, the web page, the Cloudflare
+  backend, trips, neighbours, watched and quiet coves, the deep sea, echoes, three gestures, cove names
 - **Later**: live wallpaper, Windows and Linux, a menu bar item, plugins (new species only), signing
 
 **Confirmed:**
+Confirmed
