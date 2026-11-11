@@ -1,0 +1,645 @@
+/// Metal source for the cove scene, compiled at runtime so the package builds without Xcode.
+///
+/// The sea is simulated first (an FFT ocean, see `OceanShaders`); then `scene_fragment` draws the picture
+/// back to front: the water and the surface seen from below, echoes, marine snow, and
+/// the light shafts. The surface and the shafts come from the same wave field, so the light moves with the
+/// waves. The kelp and the whales are drawn on top as 3D geometry (`kelp_*`, `whale_*`), and the small fish
+/// last, in front of everything (`fish_fragment`).
+///
+///
+/// The optics (refraction through the wave normal, Snell's window, total internal reflection, and caustics
+/// from the curvature of the refracting surface) follow the approach of Evan Wallace's WebGL Water
+/// (https://github.com/evanw/webgl-water, MIT licence, Copyright 2011 Evan Wallace), re-derived for this
+/// camera; see THIRD-PARTY-NOTICES.md.
+enum SceneShaders {
+    static let source = """
+    #include <metal_stdlib>
+    using namespace metal;
+
+    // Must match SceneBuffer.
+    constant int CREATURES = 14;
+    constant int ECHOES = 326;
+
+    struct VOut { float4 position [[position]]; float2 uv; };
+
+    vertex VOut scene_vertex(uint vid [[vertex_id]]) {
+        float2 p = float2(float((vid << 1) & 2), float(vid & 2));
+        VOut o;
+        o.position = float4(p * 2.0 - 1.0, 0.0, 1.0);
+        o.uv = p;
+        return o;
+    }
+
+    float hash21(float2 p) {
+        float3 p3 = fract(float3(p.xyx) * 0.1031);
+        p3 += dot(p3, p3.yzx + 33.33);
+        return fract((p3.x + p3.y) * p3.z);
+    }
+
+    float2 rotate(float2 p, float a) {
+        float c = cos(a), s = sin(a);
+        return float2(c * p.x + s * p.y, -s * p.x + c * p.y);
+    }
+
+    // MARK: Camera and sea
+
+    // The camera stands on the seabed, 30 m down (about as deep as giant kelp grows), and is tilted 15 degrees up, like a webcam on the
+    // ground. It is a real perspective camera with a wide lens (70 degree vertical field of view): the lower
+    // third of the picture looks into the deep, and Snell's window, where the sky shows through, lies along
+    // the top.
+    constant float CAMERA_DEPTH = 30.0;
+    constant float FOCAL = 0.714;
+    constant float PITCH = 0.262;
+    constant float HORIZON = 0.309;            // 0.5 - FOCAL * tan(PITCH)
+    // Sea.cascadeSizes: long swell, wind sea, ripples.
+    constant float CASCADE_SIZES[3] = { 211.3, 39.7, 7.43 };
+    constant float WATER_IOR = 1.333;
+    constant float MAX_WAVE = 3.0;             // no wave rises or dips further than this, in metres
+
+    // The sky at this moment (see Sky.swift): the sun by day, the moon by night.
+    constant int SKY = 2;                      // SceneBuffer.skyStart
+    struct Sky {
+        float3 light;                          // direction towards the sun or the moon, above the water
+        float intensity;
+        float3 colour;
+        float ambient;                         // how bright the water itself is
+        float3 zenith;
+        float3 horizon;
+    };
+
+    Sky skyFrom(float4 light, float4 colour, float4 zenith, float4 horizon) {
+        Sky s;
+        s.light = normalize(light.xyz);
+        s.intensity = light.w;
+        s.colour = colour.rgb;
+        s.ambient = colour.a;
+        s.zenith = zenith.rgb;
+        s.horizon = horizon.rgb;
+        return s;
+    }
+
+    struct SeaTextures {
+        texture2d_array<float> displacement;   // per cascade: (Dx, height, Dz, dDx/dz)
+        texture2d_array<float> derivatives;    // per cascade: (slope x, slope z, dDx/dx, dDz/dz)
+        texture2d_array<float> curvature;      // per cascade: (d2h/dx2, d2h/dxdz, d2h/dz2, -)
+    };
+
+    constexpr sampler seaSampler(address::repeat, filter::linear, mip_filter::linear);
+
+    float3 viewRay(float2 uv, float aspect) {
+        float u = (uv.x - 0.5) * aspect;
+        float v = uv.y - 0.5;
+        float cp = cos(PITCH), sp = sin(PITCH);
+        return normalize(float3(u, v * cp + FOCAL * sp, FOCAL * cp - v * sp));
+    }
+
+    // The same sea seen from 4 m above, looking towards the sun: for checking the waves.
+    float3 viewRayAbove(float2 uv, float aspect) {
+        float u = (uv.x - 0.5) * aspect;
+        float v = uv.y - 0.5;
+        float cp = cos(-0.14), sp = sin(-0.14);
+        return normalize(float3(u, v * cp + FOCAL * sp, FOCAL * cp - v * sp));
+    }
+
+    // Direction towards the light under water (the light bends towards the vertical as it enters).
+    float3 sunInWater(float3 light) {
+        float3 down = refract(-light, float3(0, 1, 0), 1.0 / WATER_IOR);
+        return -down;
+    }
+
+    // The colour of the water itself, deep blue at the bottom, lighter towards the surface.
+    float3 water(float y, float ambient) {
+        float3 deep = float3(0.002, 0.015, 0.055);
+        float3 middle = float3(0.010, 0.075, 0.210);
+        float3 high = float3(0.030, 0.170, 0.400);
+        float3 c = mix(deep, middle, smoothstep(0.05, HORIZON + 0.10, y));
+        return mix(c, high, smoothstep(HORIZON + 0.10, 1.0, y)) * ambient;
+    }
+
+    // How strongly the waves focus sunlight at `depth` metres below surface point `q`: the inverse of how
+    // much a small bundle of refracted sunlight has spread (< 1) or narrowed (> 1) on its way down.
+    // The slope of the surface at q (metres), summed over the cascades. Ripples finer than a pixel are faded
+    // out with distance; the choppy crests (horizontal displacement) steepen the slope.
+    float2 slopeAt(SeaTextures sea, float2 q, float distance) {
+        float2 slope = 0.0;
+        float jxx = 0.0, jzz = 0.0;
+        for (int c = 0; c < 3; c++) {
+            float fade = c == 2 ? exp(-distance / 30.0) : (c == 1 ? exp(-distance / 200.0) : 1.0);
+            float4 d = sea.derivatives.sample(seaSampler, q / CASCADE_SIZES[c], c, level(0.0));
+            slope += d.xy * fade;
+            jxx += d.z * fade;
+            jzz += d.w * fade;
+        }
+        return slope / max(float2(1.0 + jxx, 1.0 + jzz), 0.25);
+    }
+
+    // Curvature of the surface. `broad` keeps only the long waves: seen along a line of sight through the
+    // water, the fine caustic net averages out and only the broad focusing shows as light shafts.
+    float4 curvatureAt(SeaTextures sea, float2 q, bool broad) {
+        float4 c = sea.curvature.sample(seaSampler, q / CASCADE_SIZES[0], 0, level(0.0));
+        if (broad) return c + sea.curvature.sample(seaSampler, q / CASCADE_SIZES[1], 1, level(2.5));
+        return c + sea.curvature.sample(seaSampler, q / CASCADE_SIZES[1], 1, level(0.0));
+    }
+
+    float focusAt(SeaTextures sea, float2 q, float depth, bool broad) {
+        float4 c = curvatureAt(sea, q, broad);
+        // The sun is a disk, not a point, so deep caustics blur: the focusing grows more slowly with depth.
+        // The broad version already reads blurred curvature, so it needs less of this.
+        float blurred = depth / (1.0 + depth / (broad ? 20.0 : 8.0));
+        float k = blurred * (1.0 - 1.0 / WATER_IOR);
+        float jacobian = (1.0 + k * c.x) * (1.0 + k * c.z) - (k * c.y) * (k * c.y);
+        return min(1.0 / max(abs(jacobian), 0.15), 4.0);
+    }
+
+    // Caustics on something at `depth` metres: the focused light, following the sun's slant to the surface.
+    float causticAt(SeaTextures sea, float3 light, float2 position, float depth, bool broad) {
+        float3 sun = sunInWater(light);
+        float2 q = position + sun.xz * (depth / sun.y);
+        return focusAt(sea, q, depth, broad);
+    }
+
+    // Height of the long waves at the point x (metres). The choppy crests are waves pushed sideways, so the
+    // sideways push is undone first to find which part of the wave lies above x.
+    float heightOf(texture2d_array<float> displacement, float2 x) {
+        float4 d = displacement.sample(seaSampler, x / CASCADE_SIZES[0], 0, level(0.0));
+        return displacement.sample(seaSampler, (x - d.xz) / CASCADE_SIZES[0], 0, level(0.0)).y;
+    }
+
+    float heightAt(SeaTextures sea, float2 x) { return heightOf(sea.displacement, x); }
+
+    // Where a line of sight meets the waves: the distance along the ray, or a negative value if it never
+    // does. Works from below and from above. The ray is walked through the layer the waves occupy until it
+    // crosses the surface, then the crossing is refined.
+    float surfaceHit(SeaTextures sea, float3 origin, float3 ray) {
+        if (abs(ray.y) < 1e-4) return -1.0;
+        float side = sign(ray.y);
+        float start = max((-MAX_WAVE * side - origin.y) / ray.y, 0.0);
+        float end = min((MAX_WAVE * side - origin.y) / ray.y, 600.0);
+        if (end <= start) return -1.0;
+        const int STEPS = 10;
+        float dt = (end - start) / float(STEPS);
+        float before = start;
+        float gapBefore = side * (origin.y + start * ray.y - heightAt(sea, origin.xz + ray.xz * start));
+        for (int i = 1; i <= STEPS; i++) {
+            float t = start + dt * float(i);
+            float gap = side * (origin.y + t * ray.y - heightAt(sea, origin.xz + ray.xz * t));
+            if (gap > 0.0) {
+                for (int k = 0; k < 2; k++) {               // refine between the last two steps
+                    float middle = before + (t - before) * (-gapBefore / (gap - gapBefore));
+                    float gapMiddle = side * (origin.y + middle * ray.y
+                                              - heightAt(sea, origin.xz + ray.xz * middle));
+                    if (gapMiddle > 0.0) { t = middle; gap = gapMiddle; }
+                    else { before = middle; gapBefore = gapMiddle; }
+                }
+                return before + (t - before) * (-gapBefore / (gap - gapBefore));
+            }
+            before = t;
+            gapBefore = gap;
+        }
+        return end;
+    }
+
+    // The upward normal of the surface above the point x, from all three wave scales.
+    float3 normalAt(SeaTextures sea, float2 x, float distance) {
+        float2 push = sea.displacement.sample(seaSampler, x / CASCADE_SIZES[0], 0, level(0.0)).xz
+                    + sea.displacement.sample(seaSampler, x / CASCADE_SIZES[1], 1, level(0.0)).xz;
+        float2 slope = slopeAt(sea, x - push, distance);
+        return normalize(float3(-slope.x, 1.0, -slope.y));
+    }
+
+    // The sky and the sun, as seen in direction `direction` above the water.
+    float3 skyColour(Sky s, float3 direction) {
+        float towards = saturate(dot(direction, s.light));
+        float3 c = mix(s.horizon, s.zenith, pow(saturate(direction.y), 0.7));
+        // The disc of the sun or the moon, and the glow around it.
+        c += s.colour * s.intensity * (pow(towards, 3000.0) * 60.0 + pow(towards, 200.0) * 3.0
+                                       + pow(towards, 10.0) * 0.7);
+        return c;
+    }
+
+    float3 toneMap(float3 c) { return 1.0 - exp(-c * 1.0); }
+
+    // The underside of the surface, drawn where the line of sight really meets the waves. Inside Snell's
+    // window the sky and the sun shine through; outside it the surface is a mirror for the water below. Every
+    // wave tilts the surface, so the edge of the window, the sun's glitter and the mirrored water all move with
+    // the waves.
+    float3 surfaceUnderside(SeaTextures sea, Sky sky, float3 ray, float y) {
+        float3 body = water(y, sky.ambient);
+        if (ray.y <= 0.0) return body;
+        float3 origin = float3(0.0, -CAMERA_DEPTH, 0.0);
+        float t = surfaceHit(sea, origin, ray);
+        if (t < 0.0) return body;
+        float3 hit = origin + ray * t;
+        float3 normal = normalAt(sea, hit.xz, t);
+
+        // The mirror shows the water below: lighter near the surface, dark blue straight down.
+        float3 mirrored = reflect(ray, -normal);
+        float3 reflected = mix(float3(0.004, 0.035, 0.110), float3(0.030, 0.160, 0.340),
+                               pow(1.0 - saturate(-mirrored.y), 3.0)) * sky.ambient;
+        float3 through = refract(ray, -normal, WATER_IOR);
+        float3 c;
+        if (dot(through, through) < 1e-5) {
+            c = reflected;                                  // total internal reflection
+        } else {
+            float fresnel = 0.02 + 0.98 * pow(1.0 - saturate(dot(through, normal)), 5.0);
+            c = mix(skyColour(sky, through), reflected, fresnel);
+        }
+        c = toneMap(c);
+        // Light reaching the camera through the water turns blue and fades with distance.
+        float3 clear = exp(-t * float3(0.0150, 0.0130, 0.0100));
+        return c * clear + body * (1.0 - clear);
+    }
+
+    // The sea from above, for checking the waves against footage of a real sea.
+    float3 seaFromAbove(SeaTextures sea, Sky sky, float3 ray) {
+        float3 origin = float3(0.0, 4.0, 0.0);
+        float3 horizon = toneMap(skyColour(sky, normalize(float3(ray.x, max(ray.y, 0.0) + 0.02, ray.z))));
+        if (ray.y >= 0.0) return horizon;
+        float t = surfaceHit(sea, origin, ray);
+        if (t < 0.0) return horizon;
+        float3 hit = origin + ray * t;
+        float3 normal = normalAt(sea, hit.xz, t);
+        float3 mirrored = reflect(ray, normal);
+        mirrored.y = abs(mirrored.y);
+        float fresnel = 0.02 + 0.98 * pow(1.0 - saturate(dot(-ray, normal)), 5.0);
+        float3 c = toneMap(mix(float3(0.010, 0.060, 0.090) * sky.ambient, skyColour(sky, mirrored), fresnel));
+        return mix(horizon, c, exp(-t / 900.0));
+    }
+
+    // Light shafts: sunlight scattered towards the camera along its line of sight. At every step the light is
+    // as bright as the long waves above have focused it, so the shafts sway and flicker with the waves; a shaft
+    // is a line through the water along the sunlight, so collecting along the line of sight draws it as a streak.
+    // Seawater scatters mostly forwards, so the shafts are strongest when looking towards the sun.
+    float3 lightShafts(SeaTextures sea, Sky sky, float3 ray, float2 pixel, float y) {
+        float3 sun = sunInWater(sky.light);
+        float g = 0.55;
+        float mu = dot(ray, sun);
+        float phase = (1.0 - g * g) / pow(1.0 + g * g - 2.0 * g * mu, 1.5);
+        const int STEPS = 24;
+        float range = ray.y > 0.0 ? min(32.0, (CAMERA_DEPTH - 0.3) / ray.y) : 32.0;
+        float dt = range / float(STEPS);
+        // A fixed per-pixel offset hides the steps without flickering from frame to frame.
+        float offset = hash21(floor(pixel));
+        float light = 0.0;
+        for (int i = 0; i < STEPS; i++) {
+            float t = (float(i) + offset) * dt;
+            float3 point = float3(0.0, -CAMERA_DEPTH, 0.0) + ray * t;
+            float depth = -point.y;
+            if (depth < 0.3) continue;
+            float focus = causticAt(sea, sky.light, point.xz, depth, true);
+            light += ((focus - 1.0) * 1.8 + 0.10) * exp(-depth * 0.07) * exp(-t * 0.05) * dt;
+        }
+        // Only very few rays reach the deep in the lower third of the picture.
+        float reach = mix(0.12, 1.0, smoothstep(0.08, HORIZON + 0.22, y));
+        // The light is warm just under the surface and turns blue on its way down.
+        float3 tint = mix(float3(0.030, 0.085, 0.180), sky.colour * 0.17, smoothstep(HORIZON, 1.0, y));
+        return tint * 0.09 * max(light, 0.0) * min(phase, 6.0) * reach * sky.intensity;
+    }
+
+    float3 fogged(float3 c, float depth, float y, float ambient) {
+        return mix(c * (0.2 + 0.8 * min(ambient, 1.2)), water(y, ambient), saturate(0.12 + 0.78 * depth));
+    }
+
+    float4 drawFish(float2 p, float4 a, float4 b, float4 c, float px, float ambient) {
+        float scale = 0.024 * b.y * (1.15 - 0.6 * a.z);
+        float2 q = (p - a.xy) / scale;
+        if (abs(q.x) > 1.0 || abs(q.y) > 0.5) return float4(0.0);
+        q.x /= sign(a.w + 1e-4) * max(abs(a.w), 0.2);
+        float aa = px / scale * 1.2;
+
+        float dBody = (length(q / float2(0.5, 0.15)) - 1.0) * 0.15;
+        float2 tq = q - float2(-0.5, sin(b.x) * 0.05);
+        float tailHalf = 0.03 + (-tq.x) * 0.55;
+        float dTail = max(abs(tq.y) - tailHalf, max(tq.x - 0.04, -tq.x - 0.22));
+        float alpha = smoothstep(aa, -aa, min(dBody, dTail)) * b.z;
+        if (alpha <= 0.001) return float4(0.0);
+
+        float3 silver = float3(0.24, 0.31, 0.35);
+        float3 gold = float3(0.27, 0.31, 0.30);
+        float3 col = mix(silver, gold, saturate(c.x / 3.0));
+        col *= 0.7 + 0.5 * saturate(q.y / 0.15 * 0.5 + 0.5);
+        return float4(fogged(col, a.z, a.y, ambient), alpha);
+    }
+
+    float3 drawEcho(float2 p, float4 a, float4 b, float t, int i) {
+        float r = 0.06 * b.y * (1.15 - 0.6 * a.z);
+        float2 rel = p - a.xy;
+        float dd = length(rel / float2(1.8, 1.0));
+        float shimmer = a.w * exp(-dd * dd / (r * r))
+                      * (0.55 + 0.45 * sin(t * 0.6 + float(i) * 2.1 + p.x * 40.0 + p.y * 25.0));
+        float3 c = float3(0.10, 0.20, 0.24) * shimmer * 0.6;
+        if (b.x >= 0.0) {
+            float radius = b.x * 0.28;
+            float ring = exp(-pow((length(rel) - radius) / 0.006, 2.0));
+            c += float3(0.12, 0.22, 0.26) * ring * (1.0 - b.x) * a.w * 0.5;
+        }
+        return c;
+    }
+
+    fragment float4 scene_fragment(VOut in [[stage_in]], constant float4 *d [[buffer(0)]],
+                                   texture2d_array<float> displacement [[texture(0)]],
+                                   texture2d_array<float> derivatives [[texture(1)]],
+                                   texture2d_array<float> curvature [[texture(2)]]) {
+        SeaTextures sea = { displacement, derivatives, curvature };
+        float aspect = d[0].x;
+        float t = d[0].y;
+        int echoCount = int(d[1].x);
+        float px = d[1].y;
+        float2 p = float2(0.8 + (in.uv.x - 0.5) * aspect, in.uv.y);
+
+        float3 ray = viewRay(in.uv, aspect);
+        Sky sky = skyFrom(d[SKY], d[SKY + 1], d[SKY + 2], d[SKY + 3]);
+        if (d[1].z > 0.5) {
+            return float4(seaFromAbove(sea, sky, viewRayAbove(in.uv, aspect)), 1.0);
+        }
+        float3 col = surfaceUnderside(sea, sky, ray, p.y);
+
+
+        for (int i = 0; i < echoCount; i++) {
+            col += drawEcho(p, d[ECHOES + i * 2], d[ECHOES + i * 2 + 1], t, i);
+        }
+
+
+        // Marine snow, drifting down.
+        for (int l = 0; l < 2; l++) {
+            float fl = float(l);
+            float sc = l == 0 ? 60.0 : 32.0;
+            float2 g = p * sc + float2(sin(t * 0.05 + fl) * 2.0, t * (0.012 + 0.01 * fl) * sc);
+            float2 cell = floor(g);
+            float2 f = fract(g) - 0.5;
+            float h = hash21(cell + fl * 17.0);
+            float2 off = float2(hash21(cell + 3.1), hash21(cell + 7.7)) - 0.5;
+            float m = smoothstep(0.07 + 0.04 * fl, 0.0, length(f - off * 0.6)) * step(0.86, h);
+            col += float3(0.05, 0.07, 0.07) * m * (0.5 + 0.5 * fl) * (0.3 + 0.7 * min(sky.ambient, 1.0));
+        }
+
+        col += lightShafts(sea, sky, ray, in.position.xy, in.uv.y);
+
+        float2 v = (in.uv - 0.5) * float2(1.0, 0.8);
+        col *= 1.0 - 0.35 * dot(v, v);
+        col += (hash21(in.position.xy) - 0.5) / 255.0;
+        return float4(saturate(col), 1.0);
+    }
+
+    // The small fish, drawn last over the whole picture: they swim near the camera, in front of the whales
+    // and the kelp. The colour is premultiplied by its coverage.
+    fragment float4 fish_fragment(VOut in [[stage_in]], constant float4 *d [[buffer(0)]]) {
+        float aspect = d[0].x;
+        int fishCount = int(d[0].z);
+        float px = d[1].y;
+        float ambient = d[SKY + 1].w;
+        float2 p = float2(0.8 + (in.uv.x - 0.5) * aspect, in.uv.y);
+        float4 result = float4(0.0);
+        for (int i = 0; i < fishCount; i++) {
+            int b = CREATURES + i * 3;
+            float4 s = drawFish(p, d[b], d[b + 1], d[b + 2], px, ambient);
+            result = float4(result.rgb * (1.0 - s.a) + s.rgb * s.a, result.a * (1.0 - s.a) + s.a);
+        }
+        if (result.a <= 0.001) discard_fragment();
+        float2 v = (in.uv - 0.5) * float2(1.0, 0.8);
+        result.rgb *= 1.0 - 0.35 * dot(v, v);
+        return result;
+    }
+
+    // MARK: Kelp
+
+    // Giant kelp as geometry. One mesh (see KelpMesh) is drawn once per stalk; this shader bends the stalk
+    // through the water and hangs the blades on it.
+
+    constant float BLADES = 64.0;                         // KelpMesh.blades
+    constant float2 CURRENT = float2(0.80, 0.60);         // the way the current flows (x, z)
+    constant float2 SURGE = float2(0.60, 0.80);           // the way the swell pushes the water back and forth
+
+    struct KelpIn { float4 data [[attribute(0)]]; };       // s, u, v, blade
+    struct KelpOut {
+        float4 position [[position]];
+        float3 world;
+        float3 normal;
+        float2 uv;                                         // along and across a blade
+        float blade;                                       // < 0 for the stalk
+        float lift;                                        // metres above the root
+    };
+
+    float4 project(float3 world, float aspect) {
+        float3 d = world - float3(0.0, -CAMERA_DEPTH, 0.0);
+        float cp = cos(PITCH), sp = sin(PITCH);
+        float yc = d.y * cp - d.z * sp;
+        float zc = d.y * sp + d.z * cp;
+        float near = 0.3, far = 400.0;
+        return float4(2.0 * FOCAL * d.x / aspect, 2.0 * FOCAL * yc, far / (far - near) * (zc - near), zc);
+    }
+
+    // A point on the stalk. s runs 0...1 from root to tip. `rise` returns how high the point is, 0 at the
+    // root and 1 at the surface.
+    float3 stalkPoint(float4 a, float4 b, float s, constant float4 *u, texture2d_array<float> displacement,
+                      thread float &rise) {
+        float depth = a.y;
+        float along = s * a.w;
+        float top = depth - 0.6;                           // the stalk levels off just below the surface
+        float below = 1.5 * log(1.0 + exp((top - along) / 1.5));
+        float y = -0.6 - below;
+        float height = top - below;
+        float trail = max(along - height, 0.0);            // the part lying along the surface
+        rise = saturate(height / top);
+
+        float2 xz = a.xz;
+        xz += CURRENT * (trail * 0.9 + 0.20 * height * rise);              // leans and trails with the current
+        xz += SURGE * (0.52 + 0.79 * rise) * pow(rise, 1.2) * sin(u[0].y - 1.0 * s + b.x);
+        xz += float2(-CURRENT.y, CURRENT.x) * 0.3 * rise * sin(u[0].z + b.x * 1.7);
+        // The stalks of one plant wind loosely around each other.
+        xz += 0.16 * float2(cos(along * 0.45 + b.y), sin(along * 0.45 + b.y)) * smoothstep(0.0, 3.0, along);
+        // The canopy rides the waves.
+        y += smoothstep(3.0, 0.5, -y) * heightOf(displacement, xz);
+        return float3(xz.x, y, xz.y);
+    }
+
+    vertex KelpOut kelp_vertex(KelpIn in [[stage_in]], uint instance [[instance_id]],
+                               constant float4 *fronds [[buffer(1)]],
+                               constant float4 *u [[buffer(2)]],
+                               texture2d_array<float> displacement [[texture(0)]]) {
+        float4 a = fronds[instance * 2];                   // base x, base depth, base z, length
+        float4 b = fronds[instance * 2 + 1];               // sway phase, twist phase, blade seed, blade scale
+        float aspect = u[0].x;
+        float3 camera = float3(0.0, -CAMERA_DEPTH, 0.0);
+        KelpOut out;
+        out.blade = in.data.w;
+        float rise;
+
+        if (in.data.w < 0.0) {                             // the stalk: a ribbon that faces the camera
+            float s = in.data.x;
+            float3 centre = stalkPoint(a, b, s, u, displacement, rise);
+            float3 ahead = stalkPoint(a, b, min(s + 0.01, 1.0), u, displacement, rise);
+            float3 behind = stalkPoint(a, b, max(s - 0.01, 0.0), u, displacement, rise);
+            float3 tangent = normalize(ahead - behind);
+            float3 toCamera = normalize(camera - centre);
+            float3 side = normalize(cross(tangent, toCamera));
+            // Never thinner than about a pixel, so distant stalks don't break up.
+            float width = max(0.065, length(camera - centre) * u[1].x * 0.9);
+            out.world = centre + side * in.data.z * width;
+            out.normal = toCamera;
+            out.uv = float2(s, in.data.z);
+            stalkPoint(a, b, s, u, displacement, rise);
+        } else {
+            float j = in.data.w;
+            float h1 = hash21(float2(j, b.z)), h2 = hash21(float2(j + 17.0, b.z)), h3 = hash21(float2(j + 41.0, b.z));
+            // Blades sit closer together towards the top.
+            float s = 0.06 + 0.94 * pow((j + h1) / BLADES, 0.75);
+            float3 base = stalkPoint(a, b, s, u, displacement, rise);
+
+            float theta = j * 2.39996 + b.z;
+            // Blades hang off the stalk in all directions and stream with the current.
+            float3 direction = float3(cos(theta), 0.1 + 0.5 * (h2 - 0.5), sin(theta)) * 0.9
+                             + float3(CURRENT.x, 0.0, CURRENT.y) * 0.45;
+            // Blades trail behind the stalk as the surge moves it.
+            float velocity = cos(u[0].y - 1.0 * s + b.x);
+            direction -= float3(SURGE.x, 0.0, SURGE.y) * velocity * 0.6 * rise;
+            direction = normalize(direction);
+            float3 across = normalize(cross(direction, float3(0.0, 1.0, 0.0)));
+            float3 normal = cross(across, direction);
+            float twist = h3 * 6.2832;
+            float3 turned = across * cos(twist) + normal * sin(twist);
+            normal = cross(turned, direction);
+
+            float along = in.data.y;
+            float bladeLength = (1.30 + 1.00 * h2) * b.w;
+            float flutter = sin(u[0].w * (h1 < 0.5 ? 1.0 : 2.0) + j * 1.3);
+            float3 point = base + direction * bladeLength * along
+                         + normal * (0.12 * along * along * flutter + 0.05 * along * sin(along * 9.0 + j))
+                         // Blades curl: most upwards towards the light, some downwards.
+                         + float3(0.0, h3 < 0.75 ? 0.45 : -0.35, 0.0) * along * along * bladeLength
+                         + turned * 0.25 * bladeLength * along * along * (h1 - 0.5);
+            float halfWidth = 0.150 * b.w * pow(sin(3.14159 * pow(along, 0.50)), 0.9)
+                            + 0.022 * exp(-pow(along / 0.06, 2.0));        // the gas bladder at the base
+            out.world = point + turned * in.data.z * halfWidth;
+            out.normal = normal;
+            out.uv = float2(along, in.data.z);
+        }
+        out.lift = rise * (a.y - 0.6);
+        out.position = project(out.world, aspect);
+        return out;
+    }
+
+    fragment float4 kelp_fragment(KelpOut in [[stage_in]], constant float4 *u [[buffer(0)]]) {
+        float3 camera = float3(0.0, -CAMERA_DEPTH, 0.0);
+        float3 toCamera = camera - in.world;
+        float distance = length(toCamera);
+        float3 view = toCamera / distance;
+        float3 normal = normalize(in.normal);
+        if (dot(normal, view) < 0.0) normal = -normal;
+        float3 sun = sunInWater(normalize(u[2].xyz));
+        float depth = max(-in.world.y, 0.0);
+        float ambient = u[3].w;
+        float sunlight = exp(-depth * 0.055) * u[2].w;
+
+        float3 c;
+        if (in.blade < 0.0) {
+            c = float3(0.030, 0.026, 0.012) * (0.30 * ambient + 0.6 * sunlight);
+        } else {
+            float lit = saturate(dot(normal, sun));
+            // Sunlight shining through a blade towards the camera glows amber, most at the thin edges.
+            float behind = saturate(dot(-normal, sun) + 0.25);
+            float towards = pow(saturate(dot(-view, sun) * 0.5 + 0.5), 2.0);
+            float through = behind * towards * (0.65 + 0.35 * abs(in.uv.y));
+            c = float3(0.060, 0.055, 0.020) * (0.25 * ambient + 0.5 * sunlight + 0.7 * lit * sunlight)
+              + float3(0.80, 0.62, 0.30) * u[3].rgb * through * sunlight * 1.6;
+            c *= 1.0 - 0.30 * smoothstep(0.18, 0.0, abs(in.uv.y));         // the midrib
+            c *= 0.92 + 0.08 * sin(in.uv.x * 38.0 + in.blade);              // the wrinkled surface
+        }
+
+        // The water between the kelp and the camera.
+        float y = 1.0 - in.position.y * u[1].x;
+        float3 clear = exp(-distance * float3(0.052, 0.040, 0.036));
+        // The roots are lost in the gloom near the seabed.
+        clear *= smoothstep(0.0, 9.0, in.lift);
+        c = c * clear + water(y, ambient) * 0.93 * (1.0 - clear);
+        float2 v = float2(in.position.x * u[1].x / u[0].x - 0.5, y - 0.5) * float2(1.0, 0.8);
+        c *= 1.0 - 0.35 * dot(v, v);
+        return float4(saturate(c), 1.0);
+    }
+
+    // MARK: Whales
+
+    // A whale model (see tools/prepare-whales.py), swum by its own skeleton animation: every vertex follows up
+    // to four joints. The joint matrices put it in the whale's own space, where x runs from the flukes (-0.5)
+    // to the snout (+0.5) and y is up.
+
+    struct WhaleIn {
+        float3 position [[attribute(0)]];
+        float3 normal [[attribute(1)]];
+        float2 uv [[attribute(2)]];
+        uint4 joints [[attribute(3)]];
+        float4 weights [[attribute(4)]];
+    };
+    struct WhaleOut {
+        float4 position [[position]];
+        float3 world;
+        float3 normal;
+        float2 uv;
+    };
+
+    constexpr sampler skinSampler(address::repeat, filter::linear, mip_filter::linear);
+
+    // w[0] position, length · w[1] forward, roll · w[2] -, opacity · w[3] aspect, 1 / picture height
+    // w[4] light direction, intensity · w[5] light colour, ambient · from w[6]: three rows per joint
+    vertex WhaleOut whale_vertex(WhaleIn in [[stage_in]], constant float4 *w [[buffer(1)]]) {
+        float4 bind = float4(in.position, 1.0);
+        float4 bindNormal = float4(in.normal, 0.0);
+        float3 p = float3(0.0);
+        float3 n = float3(0.0);
+        for (int i = 0; i < 4; i++) {
+            float weight = in.weights[i];
+            if (weight <= 0.0) continue;
+            int row = 6 + int(in.joints[i]) * 3;
+            p += weight * float3(dot(w[row], bind), dot(w[row + 1], bind), dot(w[row + 2], bind));
+            n += weight * float3(dot(w[row], bindNormal), dot(w[row + 1], bindNormal), dot(w[row + 2], bindNormal));
+        }
+        n = normalize(n);
+
+        float3 forward = normalize(w[1].xyz);
+        float3 right = normalize(cross(forward, float3(0.0, 1.0, 0.0)));
+        float3 up = cross(right, forward);
+        float c = cos(w[1].w), s = sin(w[1].w);
+        float3 rolledUp = up * c + right * s;
+        float3 rolledRight = right * c - up * s;
+
+        WhaleOut out;
+        out.world = w[0].xyz + (forward * p.x + rolledUp * p.y + rolledRight * p.z) * w[0].w;
+        out.normal = forward * n.x + rolledUp * n.y + rolledRight * n.z;
+        out.uv = in.uv;
+        out.position = project(out.world, w[3].x);
+        return out;
+    }
+
+    fragment float4 whale_fragment(WhaleOut in [[stage_in]], constant float4 *w [[buffer(1)]],
+                                   texture2d<float> skin [[texture(0)]],
+                                   texture2d_array<float> curvature [[texture(1)]]) {
+        float3 camera = float3(0.0, -CAMERA_DEPTH, 0.0);
+        float3 toCamera = camera - in.world;
+        float distance = length(toCamera);
+        float3 normal = normalize(in.normal);
+        if (dot(normal, toCamera) < 0.0) normal = -normal;
+        float3 light = normalize(w[4].xyz);
+        float3 sun = sunInWater(light);
+        float depth = max(-in.world.y, 0.0);
+        float ambient = w[5].w;
+        float sunlight = exp(-depth * 0.045) * w[4].w;
+
+        // Sunlight focused by the waves dapples the whale's back.
+        SeaTextures sea = { curvature, curvature, curvature };
+        float dapple = mix(1.0, causticAt(sea, light, in.world.xz, depth, false), smoothstep(0.0, 0.7, normal.y));
+
+        float3 albedo = skin.sample(skinSampler, in.uv).rgb;
+        float above = normal.y * 0.5 + 0.5;
+        float3 c = albedo * (float3(0.50, 0.75, 1.00) * ambient * (0.35 + 1.05 * above)
+                             + w[5].rgb * sunlight * saturate(dot(normal, sun)) * 2.2 * dapple);
+
+        // The water between the whale and the camera.
+        float y = 1.0 - in.position.y * w[3].y;
+        float3 clear = exp(-distance * float3(0.034, 0.021, 0.017));
+        c = c * clear + water(y, ambient) * 0.8 * (1.0 - clear);
+        float2 v = float2(in.position.x * w[3].y / w[3].x - 0.5, y - 0.5) * float2(1.0, 0.8);
+        c *= 1.0 - 0.35 * dot(v, v);
+        return float4(saturate(c), w[2].y);
+    }
+    """
+}
