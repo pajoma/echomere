@@ -1,5 +1,7 @@
 mod common;
 use common::*;
+use cove_scene::model::CoveSeed;
+use cove_scene::scene::CoveScene;
 use cove_scene::{kelp, sea};
 
 #[test]
@@ -8,12 +10,11 @@ fn sea_loops_seamlessly() {
     assert!((sea::time(NOON + 1.0) - sea::time(NOON) - 1.0).abs() < 1e-6);
 }
 
-// The Swell checks compare frames of two coves; frames arrive in Task 3. The sea
-// time depends on the moment only, so this checks that.
 #[test]
 fn every_cove_same_sea() {
-    assert_eq!(sea::time(NOON), sea::time(NOON));
-    assert!(sea::time(-1.0) >= 0.0 && sea::time(-1.0) < sea::LOOP_PERIOD);
+    let a = CoveScene::new(CoveSeed(1)).frame(NOON, &[], &[]).sea_time;
+    let b = CoveScene::new(CoveSeed(2)).frame(NOON, &[], &[]).sea_time;
+    assert_eq!(a, b);
 }
 
 #[test]
@@ -29,8 +30,9 @@ fn kelp_sways_with_swell() {
     println!("surge period {:.1} s", kelp::surge_period());
 }
 
-// The motion depends on time only, never on a cove.
 #[test]
 fn kelp_sways_same_everywhere() {
-    assert_eq!(kelp::motion(NOON), kelp::motion(NOON));
+    let a = CoveScene::new(CoveSeed(4711)).frame(NOON, &[], &[]).kelp_motion;
+    let b = CoveScene::new(CoveSeed(9)).frame(NOON, &[], &[]).kelp_motion;
+    assert_eq!(a, b);
 }
