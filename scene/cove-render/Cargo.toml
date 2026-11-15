@@ -1,0 +1,12 @@
+[package]
+name = "cove-render"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+bytemuck = { version = "1.25.2", features = ["derive"] }
+cove-scene = { path = "../cove-scene" }
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg"] }
+pollster = "1.0.1"
+wgpu = { version = "30.0.2", default-features = false, features = ["std", "parking_lot", "metal", "vulkan", "wgsl"] }
