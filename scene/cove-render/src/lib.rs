@@ -6,11 +6,14 @@
 //! and applies `finish()` (tone map, vignette, gamma encode, dither) exactly once per output pixel.
 
 mod composite;
+mod fish;
 mod gpu;
 mod kelp;
 mod ocean;
 mod targets;
 mod water;
+mod whales;
 
 pub use gpu::{RenderError, Renderer};
 pub use ocean::SeaStatistics;
+pub use whales::{assets_dir, WhaleModel};

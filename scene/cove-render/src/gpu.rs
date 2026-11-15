@@ -5,10 +5,12 @@ use std::fmt;
 use cove_scene::scene::SceneFrame;
 
 use crate::composite::Composite;
+use crate::fish::Fish;
 use crate::kelp::Kelp;
 use crate::ocean::{self, Ocean, SeaStatistics, CASCADES, N};
 use crate::targets::{Targets, DEFAULT_SCALE};
 use crate::water::Water;
+use crate::whales::{self, Whales};
 
 /// The format snapshots are read back in. Not sRGB, because `finish()` gamma-encodes itself.
 const SNAPSHOT_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
@@ -21,6 +23,8 @@ pub enum RenderError {
     NoDevice(String),
     /// Reading a result back from the GPU failed.
     Readback(String),
+    /// A file the scene needs (such as a whale model) is missing or broken.
+    Asset(String),
 }
 
 impl fmt::Display for RenderError {
@@ -29,6 +33,7 @@ impl fmt::Display for RenderError {
             RenderError::NoAdapter(e) => write!(f, "no graphics adapter: {e}"),
             RenderError::NoDevice(e) => write!(f, "cannot open the graphics device: {e}"),
             RenderError::Readback(e) => write!(f, "cannot read back from the GPU: {e}"),
+            RenderError::Asset(e) => write!(f, "cannot load {e}"),
         }
     }
 }
@@ -49,6 +54,8 @@ pub struct Renderer {
     ocean: Ocean,
     water: Water,
     kelp: Kelp,
+    whales: Whales,
+    fish: Fish,
     composite: Composite,
     /// Shows the sea from 4 m above instead of the cove, for checking the waves.
     sea_from_above: bool,
@@ -72,22 +79,25 @@ impl Renderer {
             ..Default::default()
         }))
         .map_err(|e| RenderError::NoDevice(e.to_string()))?;
-        Ok(Self::new(instance, adapter, device, queue, SNAPSHOT_FORMAT))
+        Self::new(instance, adapter, device, queue, SNAPSHOT_FORMAT)
     }
 
-    /// A renderer for a device the caller opened, drawing into outputs of `surface_format`.
+    /// A renderer for a device the caller opened, drawing into outputs of `surface_format`. It loads the
+    /// whale models from the assets (see [`whales::assets_dir`]) and fails if they cannot be read.
     pub fn new(
         instance: wgpu::Instance,
         adapter: wgpu::Adapter,
         device: wgpu::Device,
         queue: wgpu::Queue,
         surface_format: wgpu::TextureFormat,
-    ) -> Self {
+    ) -> Result<Self, RenderError> {
         let ocean = Ocean::new(&device, &queue);
         let water = Water::new(&device, &ocean);
         let kelp = Kelp::new(&device, &queue, &ocean);
+        let whales = Whales::new(&device, &queue, &ocean, &whales::whales_dir())?;
+        let fish = Fish::new(&device, &water.uniforms);
         let composite = Composite::new(&device);
-        Renderer {
+        Ok(Renderer {
             instance,
             adapter,
             device,
@@ -98,9 +108,11 @@ impl Renderer {
             ocean,
             water,
             kelp,
+            whales,
+            fish,
             composite,
             sea_from_above: false,
-        }
+        })
     }
 
     pub fn instance(&self) -> &wgpu::Instance {
@@ -144,8 +156,10 @@ impl Renderer {
         let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("frame") });
         self.ocean.simulate(&self.queue, &mut encoder, frame.sea_time);
         self.water.prepare(&self.queue, frame, scene_size, self.sea_from_above);
-        // The debug view of the sea from above has no kelp.
+        // The debug view of the sea from above has no kelp, whales or fish.
         self.kelp.prepare(&self.device, &self.queue, frame, scene_size, !self.sea_from_above);
+        self.whales.prepare(&self.device, &self.queue, frame, scene_size, !self.sea_from_above);
+        self.fish.prepare(frame, !self.sea_from_above);
         {
             let mut scene = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("scene"),
@@ -164,6 +178,8 @@ impl Renderer {
             });
             self.water.draw(&mut scene);
             self.kelp.draw(&mut scene);
+            self.whales.draw(&mut scene);
+            self.fish.draw(&mut scene);
         }
         self.composite.draw(&self.device, &mut encoder, targets, output, format);
         self.queue.submit([encoder.finish()]);

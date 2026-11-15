@@ -1,6 +1,7 @@
 //! Rendering checks. They run on any adapter, including a software one (lavapipe) without a GPU.
 
-use cove_render::Renderer;
+use cove_render::{Renderer, WhaleModel};
+use std::path::Path;
 use cove_scene::model::{CoveSeed, Echo, Visitor, WhaleLook, WhaleSpecies};
 use cove_scene::scene::{CoveScene, SceneFrame};
 use cove_scene::sky;
@@ -178,4 +179,60 @@ fn kelp_is_drawn() {
     let share = differing as f64 / (W * H) as f64;
     eprintln!("kelp changes {:.2} % of the pixels", share * 100.0);
     assert!(share >= 0.001, "kelp changes only {:.3} % of the pixels", share * 100.0);
+}
+
+/// The share of pixels in which two snapshots differ by more than 2 of 255 in some channel.
+fn differing_share(a: &image::RgbaImage, b: &image::RgbaImage) -> f64 {
+    let differing = a
+        .pixels()
+        .zip(b.pixels())
+        .filter(|(p, q)| (0..3).any(|i| (p[i] as i32 - q[i] as i32).abs() > 2))
+        .count();
+    differing as f64 / (a.width() * a.height()) as f64
+}
+
+#[test]
+fn missing_whale_file_is_an_error() {
+    let r = renderer();
+    let err = WhaleModel::load(Path::new("/nonexistent"), WhaleSpecies::Orca, r.device(), r.queue()).unwrap_err();
+    assert!(err.to_string().contains("orca.mesh"), "{err}");
+}
+
+/// 75 minutes after the test frame's noon two of the three guests are in view (checked with
+/// `cove_scene::camera::project` at aspect 1.6): the orca 38 m away, left of centre and high, and a
+/// southern right whale 69 m away. Under the noon sky.
+fn whales_in_view() -> SceneFrame {
+    let guests = [
+        visitor("whale-a", NOON - 5.0 * HOUR, WhaleSpecies::SouthernRightWhale),
+        visitor("whale-b", NOON - 2.0 * HOUR, WhaleSpecies::Orca),
+        visitor("whale-c", NOON - HOUR, WhaleSpecies::SouthernRightWhale),
+    ];
+    let mut f = CoveScene::new(CoveSeed(4_711)).frame(NOON + 4_500.0, &guests, &[]);
+    f.sky = sky::state(12.0);
+    f
+}
+
+#[test]
+fn whales_are_drawn() {
+    let mut r = renderer();
+    let with = whales_in_view();
+    assert_eq!(with.whales.len(), 3, "the test frame has three whales");
+    // Only the whales are taken out, so nothing else that the visitors might change can pass the check.
+    let mut without = with.clone();
+    without.whales.clear();
+    let share = differing_share(&snapshot(&mut r, &with), &snapshot(&mut r, &without));
+    eprintln!("whales change {:.2} % of the pixels", share * 100.0);
+    assert!(share >= 0.001, "whales change only {:.3} % of the pixels", share * 100.0);
+}
+
+#[test]
+fn fish_are_drawn() {
+    let mut r = renderer();
+    let with = frame();
+    assert!(!with.creatures.is_empty(), "the test frame has fish");
+    let mut without = with.clone();
+    without.creatures.clear();
+    let share = differing_share(&snapshot(&mut r, &with), &snapshot(&mut r, &without));
+    eprintln!("fish change {:.2} % of the pixels", share * 100.0);
+    assert!(share >= 0.0005, "fish change only {:.3} % of the pixels", share * 100.0);
 }

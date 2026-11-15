@@ -8,7 +8,7 @@ use crate::ocean::Ocean;
 use crate::targets::{COLOR_FORMAT, DEPTH_FORMAT};
 
 /// Packs a scene frame into the flat list of `vec4f` the water shader reads. Port of `SceneBuffer.swift`;
-/// the layout must match the constants at the top of `water.wgsl`.
+/// the layout must match the constants in `scene_buffer.wgsl`.
 pub(crate) struct SceneBuffer;
 
 impl SceneBuffer {
@@ -58,13 +58,20 @@ impl SceneBuffer {
 
 pub(crate) struct Water {
     pipeline: wgpu::RenderPipeline,
-    uniforms: wgpu::Buffer,
+    /// The scene buffer. The fish pass reads it too.
+    pub uniforms: wgpu::Buffer,
     group: wgpu::BindGroup,
 }
 
 impl Water {
     pub fn new(device: &wgpu::Device, ocean: &Ocean) -> Self {
-        let source = [include_str!("../shaders/common.wgsl"), include_str!("../shaders/water.wgsl")].concat();
+        let source = [
+            include_str!("../shaders/common.wgsl"),
+            include_str!("../shaders/scene_buffer.wgsl"),
+            include_str!("../shaders/caustics.wgsl"),
+            include_str!("../shaders/water.wgsl"),
+        ]
+        .concat();
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("water"),
             source: wgpu::ShaderSource::Wgsl(source.into()),
@@ -74,7 +81,7 @@ impl Water {
             layout: None,
             vertex: wgpu::VertexState {
                 module: &module,
-                entry_point: Some("water_vertex"),
+                entry_point: Some("fullscreen_vertex"),
                 compilation_options: Default::default(),
                 buffers: &[],
             },

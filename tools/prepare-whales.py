@@ -2,8 +2,10 @@
 """Prepares the whale models for the app.
 
 Reads the original GLB downloads from assets/whales/source/ (not in the repository; see
-assets/whales/README.md for where to get them) and writes, for each whale, a compact mesh and a reduced
-texture to macos/EchomereScene/Sources/CoveSceneRenderer/Resources/Whales/.
+assets/whales/README.md for where to get them) and writes, for each whale, a compact mesh, its swim animation
+and a reduced texture to assets/whales/prepared/, where every platform's renderer reads them. The Swift
+package keeps its own copy in macos/EchomereScene/Sources/CoveSceneRenderer/Resources/Whales/ until it is
+retired; the script refreshes that copy too while the folder exists.
 
 The mesh keeps the model's bind pose and its skeleton weights. The model's own swim animation is baked into
 an animation file: for every frame and every joint, the matrix that takes a bind-pose vertex to its place in
@@ -23,13 +25,16 @@ Usage: python3 tools/prepare-whales.py
 """
 import json
 import pathlib
+import shutil
 import struct
 import subprocess
 import tempfile
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 SOURCE = ROOT / "assets" / "whales" / "source"
-OUTPUT = ROOT / "macos" / "EchomereScene" / "Sources" / "CoveSceneRenderer" / "Resources" / "Whales"
+OUTPUT = ROOT / "assets" / "whales" / "prepared"
+# The Swift package's copy, kept in step while the package exists.
+SWIFT_COPY = ROOT / "macos" / "EchomereScene" / "Sources" / "CoveSceneRenderer" / "Resources" / "Whales"
 TEXTURE_SIZE = 1024
 FRAMES_PER_SECOND = 15
 
@@ -265,3 +270,6 @@ def convert(name, whale):
 if __name__ == "__main__":
     for whale_name, whale_config in WHALES.items():
         convert(whale_name, whale_config)
+        if SWIFT_COPY.is_dir():
+            for suffix in ("mesh", "animation", "jpg"):
+                shutil.copy2(OUTPUT / f"{whale_name}.{suffix}", SWIFT_COPY / f"{whale_name}.{suffix}")

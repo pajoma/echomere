@@ -30,17 +30,6 @@ struct VOut {
     @location(4) lift: f32,                               // metres above the root
 };
 
-fn project(world: vec3f, aspect: f32) -> vec4f {
-    let d = world - CAMERA;
-    let cp = cos(PITCH);
-    let sp = sin(PITCH);
-    let yc = d.y * cp - d.z * sp;
-    let zc = d.y * sp + d.z * cp;
-    let near = 0.3;
-    let far = 400.0;
-    return vec4f(2.0 * FOCAL * d.x / aspect, 2.0 * FOCAL * yc, far / (far - near) * (zc - near), zc);
-}
-
 // Height of the long waves at the point x (metres), as in water.wgsl.
 fn height_of(x: vec2f) -> f32 {
     let push = textureSampleLevel(displacement, sea_sampler, x / cascade_size(0), 0, 0.0);

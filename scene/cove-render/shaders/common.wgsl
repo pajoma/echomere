@@ -107,3 +107,24 @@ const PITCH: f32 = 0.262;
 const HORIZON: f32 = 0.309;            // 0.5 - FOCAL * tan(PITCH)
 // sea::CASCADE_SIZES: long swell, wind sea, ripples.
 fn cascade_size(c: i32) -> f32 { return select(select(211.3, 39.7, c == 1), 7.43, c == 2); }
+
+// Where a point in the water (metres) lands on the picture, as a clip-space position.
+fn project(world: vec3f, aspect: f32) -> vec4f {
+    let d = world - CAMERA;
+    let cp = cos(PITCH);
+    let sp = sin(PITCH);
+    let yc = d.y * cp - d.z * sp;
+    let zc = d.y * sp + d.z * cp;
+    let near = 0.3;
+    let far = 400.0;
+    return vec4f(2.0 * FOCAL * d.x / aspect, 2.0 * FOCAL * yc, far / (far - near) * (zc - near), zc);
+}
+
+// The line of sight through the point `uv` (0..1 across the picture, y up).
+fn view_ray(uv: vec2f, aspect: f32) -> vec3f {
+    let u = (uv.x - 0.5) * aspect;
+    let v = uv.y - 0.5;
+    let cp = cos(PITCH);
+    let sp = sin(PITCH);
+    return normalize(vec3f(u, v * cp + FOCAL * sp, FOCAL * cp - v * sp));
+}
