@@ -8,6 +8,8 @@
 // far.
 const FISH_NEAR: f32 = 3.0;
 const FISH_FAR: f32 = 25.0;
+// The hand-picked fish colours, decoded, are too dark for silver fish: this lifts their albedo.
+const FISH_ALBEDO_LIFT: f32 = 4.0;
 
 // One fish at picture point `p` (x from 0.8 - aspect / 2, y 0..1 up): its linear colour and its coverage.
 // a: x, y, depth, facing · b: tail phase, size, opacity, - · c: colour, -, -, -. `ray` is the pixel's line
@@ -28,7 +30,7 @@ fn draw_fish(p: vec2f, a: vec4f, b: vec4f, c: vec4f, px: f32, ray: vec3f, s: Sky
 
     let silver = to_linear(vec3f(0.24, 0.31, 0.35));
     let gold = to_linear(vec3f(0.27, 0.31, 0.30));
-    var col = mix(silver, gold, saturate(c.x / 3.0));
+    var col = FISH_ALBEDO_LIFT * mix(silver, gold, saturate(c.x / 3.0));
     col *= 0.7 + 0.5 * saturate(q.y / 0.15 * 0.5 + 0.5);          // lighter on the back
 
     // Lit and fogged by the water model as if the fish were this far along the line of sight.

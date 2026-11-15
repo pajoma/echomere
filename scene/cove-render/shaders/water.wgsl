@@ -16,8 +16,12 @@ const MAX_WAVE: f32 = 3.0;             // no wave rises or dips further than thi
 
 // Distances of the 2D elements (lighting design), in metres.
 const ECHO_DISTANCE: f32 = 20.0;
-const SNOW_NEAR: f32 = 2.0;             // layer 0
-const SNOW_FAR: f32 = 6.0;              // layer 1
+const SNOW_NEAR: f32 = 2.0;             // layer 1: the coarser, brighter, faster flakes
+const SNOW_FAR: f32 = 6.0;              // layer 0: the fine, dim, slow flakes
+// The hand-picked echo and snow colours are display values; decoded they are far too faint to be seen
+// against the water. These lift them to a faint glow (echoes) and specks (snow).
+const ECHO_LIFT: f32 = 12.0;
+const SNOW_LIFT: f32 = 120.0;
 // Overall strength of the light shafts.
 const SHAFTS: f32 = 1.0;
 
@@ -203,10 +207,11 @@ fn draw_echo(p: vec2f, a: vec4f, b: vec4f, t: f32, i: i32) -> vec3f {
         let ring = exp(-off_ring * off_ring);
         c += to_linear(vec3f(0.12, 0.22, 0.26)) * ring * (1.0 - b.x) * a.w * 0.5;
     }
-    return c * exp(-SIGMA * ECHO_DISTANCE);
+    return ECHO_LIFT * c * exp(-SIGMA * ECHO_DISTANCE);
 }
 
-// Marine snow, drifting down, in two layers (`SNOW_NEAR` and `SNOW_FAR` away). Emitted light.
+// Marine snow, drifting down, in two layers: the fine, dim, slow layer 0 `SNOW_FAR` away and the coarser
+// layer 1 `SNOW_NEAR` away. Emitted light.
 fn marine_snow(p: vec2f, t: f32, s: Sky) -> vec3f {
     var col = vec3f(0.0);
     for (var l = 0; l < 2; l++) {
@@ -218,8 +223,8 @@ fn marine_snow(p: vec2f, t: f32, s: Sky) -> vec3f {
         let h = hash21(cell + fl * 17.0);
         let off = vec2f(hash21(cell + 3.1), hash21(cell + 7.7)) - 0.5;
         let m = smoothstep_f(0.07 + 0.04 * fl, 0.0, length(f - off * 0.6)) * step(0.86, h);
-        col += to_linear(vec3f(0.05, 0.07, 0.07)) * m * (0.5 + 0.5 * fl) * (0.3 + 0.7 * min(s.ambient, 1.0))
-             * exp(-SIGMA * select(SNOW_FAR, SNOW_NEAR, l == 0));
+        col += SNOW_LIFT * to_linear(vec3f(0.05, 0.07, 0.07)) * m * (0.5 + 0.5 * fl) * (0.3 + 0.7 * min(s.ambient, 1.0))
+             * exp(-SIGMA * select(SNOW_NEAR, SNOW_FAR, l == 0));
     }
     return col;
 }

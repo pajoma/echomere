@@ -6,6 +6,8 @@
 const BLADES: f32 = 64.0;                                 // KELP_BLADES in kelp.rs
 const CURRENT: vec2f = vec2f(0.80, 0.60);                 // the way the current flows (x, z)
 const SURGE: vec2f = vec2f(0.60, 0.80);                   // the way the swell pushes the water back and forth
+// The hand-picked stalk and blade colours, decoded, are almost black: this lifts their albedo to olive brown.
+const KELP_ALBEDO_LIFT: f32 = 30.0;
 
 // u[0]: aspect, surge, drift, flutter
 // u[1]: 1 / pixels high, -, -, -
@@ -143,14 +145,14 @@ fn kelp_fragment(in: VOut) -> @location(0) vec4f {
 
     var c: vec3f;
     if (in.blade < 0.0) {
-        c = to_linear(vec3f(0.030, 0.026, 0.012)) * (ambient + 0.6 * sunlight);
+        c = KELP_ALBEDO_LIFT * to_linear(vec3f(0.030, 0.026, 0.012)) * (ambient + 0.6 * sunlight);
     } else {
         let lit = saturate(dot(normal, sun));
         // Sunlight shining through a blade towards the camera glows amber, most at the thin edges.
         let behind = saturate(dot(-normal, sun) + 0.25);
         let towards = pow(saturate(dot(-view, sun) * 0.5 + 0.5), 2.0);
         let through = behind * towards * (0.65 + 0.35 * abs(in.uv.y));
-        c = to_linear(vec3f(0.060, 0.055, 0.020)) * (ambient + 0.5 * sunlight + 0.7 * lit * sunlight)
+        c = KELP_ALBEDO_LIFT * to_linear(vec3f(0.060, 0.055, 0.020)) * (ambient + 0.5 * sunlight + 0.7 * lit * sunlight)
           + to_linear(vec3f(0.80, 0.62, 0.30)) * sunlight * through * 1.6;
         c *= 1.0 - 0.30 * smoothstep_f(0.18, 0.0, abs(in.uv.y));         // the midrib
         c *= 0.92 + 0.08 * sin(in.uv.x * 38.0 + in.blade);               // the wrinkled surface

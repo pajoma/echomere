@@ -5,6 +5,8 @@
 
 const MAX_JOINTS: i32 = 80;                               // whales::MAX_JOINTS
 const WHALE_HEADER: i32 = 6;
+// The skins are dark; decoded they read as black at 30 m. This lifts their albedo so the shape shows.
+const WHALE_ALBEDO_LIFT: f32 = 3.0;
 
 // w[0]: position, length · w[1]: forward, roll · w[2]: -, opacity, -, - · w[3]: aspect, 1 / pixels high
 // w[4]: light direction, intensity · w[5]: light colour, ambient · from w[6]: three rows per joint
@@ -74,7 +76,7 @@ fn whale_fragment(in: WhaleOut) -> @location(0) vec4f {
     // Sunlight focused by the waves dapples the whale's back.
     let dapple = mix(1.0, caustic_at(s.light, in.world.xz, depth, false), smoothstep_f(0.0, 0.7, normal.y));
 
-    let albedo = to_linear(textureSample(skin, sea_sampler, in.uv).rgb);
+    let albedo = min(WHALE_ALBEDO_LIFT * to_linear(textureSample(skin, sea_sampler, in.uv).rgb), vec3f(0.9));
     let c = albedo * (ambient_light(depth, normal, s)
                       + sunlight_at(depth, s) * saturate(dot(normal, sun)) * 2.2 * dapple);
 
