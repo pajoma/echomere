@@ -7,6 +7,7 @@
 
 mod composite;
 mod gpu;
+mod kelp;
 mod ocean;
 mod targets;
 mod water;

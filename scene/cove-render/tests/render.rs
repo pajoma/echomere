@@ -161,3 +161,21 @@ fn shader_time_wraps_daily() {
     assert!(snapshot(&mut r, &f) == snapshot(&mut r, &later));
 }
 
+
+#[test]
+fn kelp_is_drawn() {
+    let mut r = renderer();
+    let with = frame();
+    assert!(!with.kelp.is_empty(), "the test frame has kelp");
+    let mut without = with.clone();
+    without.kelp.clear();
+    let (a, b) = (snapshot(&mut r, &with), snapshot(&mut r, &without));
+    let differing = a
+        .pixels()
+        .zip(b.pixels())
+        .filter(|(p, q)| (0..3).any(|i| (p[i] as i32 - q[i] as i32).abs() > 2))
+        .count();
+    let share = differing as f64 / (W * H) as f64;
+    eprintln!("kelp changes {:.2} % of the pixels", share * 100.0);
+    assert!(share >= 0.001, "kelp changes only {:.3} % of the pixels", share * 100.0);
+}

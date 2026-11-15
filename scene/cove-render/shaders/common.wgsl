@@ -100,3 +100,10 @@ fn in_scatter(origin: vec3f, ray: vec3f, distance: f32, s: Sky) -> vec3f {
 fn through_water(c: vec3f, origin: vec3f, ray: vec3f, distance: f32, s: Sky) -> vec3f {
     return c * exp(-SIGMA * distance) + in_scatter(origin, ray, distance, s);
 }
+
+// The camera: a real perspective camera with a 70 degree vertical field of view, tilted 15 degrees up.
+const FOCAL: f32 = 0.714;
+const PITCH: f32 = 0.262;
+const HORIZON: f32 = 0.309;            // 0.5 - FOCAL * tan(PITCH)
+// sea::CASCADE_SIZES: long swell, wind sea, ripples.
+fn cascade_size(c: i32) -> f32 { return select(select(211.3, 39.7, c == 1), 7.43, c == 2); }

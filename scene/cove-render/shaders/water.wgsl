@@ -17,12 +17,6 @@ const CREATURES: i32 = 14;        // the small fish (drawn in their own pass, no
 const ECHOES: i32 = 326;
 const COUNT: i32 = 336;
 
-// The camera: a real perspective camera with a 70 degree vertical field of view, tilted 15 degrees up.
-const FOCAL: f32 = 0.714;
-const PITCH: f32 = 0.262;
-const HORIZON: f32 = 0.309;            // 0.5 - FOCAL * tan(PITCH)
-// sea::CASCADE_SIZES: long swell, wind sea, ripples.
-fn cascade_size(c: i32) -> f32 { return select(select(211.3, 39.7, c == 1), 7.43, c == 2); }
 const MAX_WAVE: f32 = 3.0;             // no wave rises or dips further than this, in metres
 
 // Distances of the 2D elements (lighting design), in metres.

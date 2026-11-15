@@ -5,6 +5,7 @@ use std::fmt;
 use cove_scene::scene::SceneFrame;
 
 use crate::composite::Composite;
+use crate::kelp::Kelp;
 use crate::ocean::{self, Ocean, SeaStatistics, CASCADES, N};
 use crate::targets::{Targets, DEFAULT_SCALE};
 use crate::water::Water;
@@ -47,6 +48,7 @@ pub struct Renderer {
     targets: Option<Targets>,
     ocean: Ocean,
     water: Water,
+    kelp: Kelp,
     composite: Composite,
     /// Shows the sea from 4 m above instead of the cove, for checking the waves.
     sea_from_above: bool,
@@ -83,6 +85,7 @@ impl Renderer {
     ) -> Self {
         let ocean = Ocean::new(&device, &queue);
         let water = Water::new(&device, &ocean);
+        let kelp = Kelp::new(&device, &queue, &ocean);
         let composite = Composite::new(&device);
         Renderer {
             instance,
@@ -94,6 +97,7 @@ impl Renderer {
             targets: None,
             ocean,
             water,
+            kelp,
             composite,
             sea_from_above: false,
         }
@@ -140,6 +144,8 @@ impl Renderer {
         let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("frame") });
         self.ocean.simulate(&self.queue, &mut encoder, frame.sea_time);
         self.water.prepare(&self.queue, frame, scene_size, self.sea_from_above);
+        // The debug view of the sea from above has no kelp.
+        self.kelp.prepare(&self.device, &self.queue, frame, scene_size, !self.sea_from_above);
         {
             let mut scene = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("scene"),
@@ -157,6 +163,7 @@ impl Renderer {
                 ..Default::default()
             });
             self.water.draw(&mut scene);
+            self.kelp.draw(&mut scene);
         }
         self.composite.draw(&self.device, &mut encoder, targets, output, format);
         self.queue.submit([encoder.finish()]);
