@@ -46,6 +46,7 @@ struct Sky {
     ambient: f32,                  // how bright the water itself is
     zenith: vec3f,
     horizon: vec3f,
+    night: f32,                    // 1 when the light is the moon's, 0 for the sun's
 };
 
 fn sky_from(light: vec4f, colour: vec4f, zenith: vec4f, horizon: vec4f) -> Sky {
@@ -54,6 +55,7 @@ fn sky_from(light: vec4f, colour: vec4f, zenith: vec4f, horizon: vec4f) -> Sky {
     s.intensity = light.w;
     s.colour = colour.rgb;
     s.ambient = colour.a;
+    s.night = zenith.w;
     s.zenith = zenith.rgb;
     s.horizon = horizon.rgb;
     return s;

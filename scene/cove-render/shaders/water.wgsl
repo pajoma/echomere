@@ -24,6 +24,9 @@ const ECHO_LIFT: f32 = 24.0;
 const SNOW_LIFT: f32 = 80.0;
 // Overall strength of the light shafts.
 const SHAFTS: f32 = 1.0;
+// The moon's shafts and its glint through the surface, relative to the sun's. The sky gives the moon half
+// the sun's intensity against a much dimmer water, which made it a spotlight; this keeps it soft.
+const MOON_SHAFTS: f32 = 0.3;
 
 @group(0) @binding(1) var displacement: texture_2d_array<f32>;   // per cascade: Dx, height, Dz, dDx/dz
 @group(0) @binding(2) var derivatives: texture_2d_array<f32>;    // per cascade: slope x, slope z, dDx/dx, dDz/dz
@@ -115,7 +118,7 @@ fn sky_colour(s: Sky, direction: vec3f) -> vec3f {
     let towards = clamp(dot(direction, s.light), 0.0, 1.0);
     var c = mix(to_linear(s.horizon), to_linear(s.zenith), pow(clamp(direction.y, 0.0, 1.0), 0.7));
     // The disc of the sun or the moon, and the glow around it.
-    c += to_linear(s.colour) * s.intensity
+    c += to_linear(s.colour) * s.intensity * mix(1.0, MOON_SHAFTS, s.night)
        * (pow(towards, 3000.0) * 60.0 + pow(towards, 200.0) * 3.0 + pow(towards, 10.0) * 0.7);
     return c;
 }
@@ -190,7 +193,7 @@ fn light_shafts(s: Sky, ray: vec3f, pixel: vec2f, y: f32) -> vec3f {
     }
     // Only very few rays reach the deep in the lower third of the picture.
     let reach = mix(0.12, 1.0, smoothstep_f(0.08, HORIZON + 0.22, y));
-    return SHAFTS * max(light, vec3f(0.0)) * SIGMA * WATER_COLOUR * min(phase, 6.0) * reach;
+    return SHAFTS * mix(1.0, MOON_SHAFTS, s.night) * max(light, vec3f(0.0)) * SIGMA * WATER_COLOUR * min(phase, 6.0) * reach;
 }
 
 // An echo: the shimmer a whale left behind, and the ring of its call. Emitted light, `ECHO_DISTANCE` away.

@@ -12,7 +12,7 @@ use crate::targets::{COLOR_FORMAT, DEPTH_FORMAT};
 pub(crate) struct SceneBuffer;
 
 impl SceneBuffer {
-    /// The sky: light direction and intensity, light colour and ambient, zenith, horizon.
+    /// The sky: light direction and intensity, light colour and ambient, zenith and night (1 or 0), horizon.
     pub const SKY_START: usize = 2;
     /// The small fish, three `vec4f` each. Packed for the fish pass; the water pass does not draw them.
     pub const CREATURE_START: usize = 14;
@@ -44,7 +44,7 @@ impl SceneBuffer {
         let v = |a: [f64; 3], w: f64| [a[0] as f32, a[1] as f32, a[2] as f32, w as f32];
         data[Self::SKY_START] = v(sky.light_direction, sky.light_intensity);
         data[Self::SKY_START + 1] = v(sky.light_colour, sky.ambient);
-        data[Self::SKY_START + 2] = v(sky.zenith, 0.0);
+        data[Self::SKY_START + 2] = v(sky.zenith, if sky.is_night { 1.0 } else { 0.0 });
         data[Self::SKY_START + 3] = v(sky.horizon, 0.0);
 
         for (i, e) in echoes.iter().enumerate() {

@@ -29,6 +29,10 @@ fn tmap(x: vec3f) -> vec3f {
     return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), vec3f(0.0), vec3f(1.0));
 }
 
+// The floor added to every pixel's linear light, so that nothing is quite black. abyssal-garden's warm
+// floor (0.008, 0.002, 0) turned dark fish red-brown at night; deep water stays blue > green > red.
+const BLACK_FLOOR: vec3f = vec3f(0.0, 0.002, 0.006);
+
 // Linear scene light to display values: exposure, ACES, a gentle luminance S-curve, a little
 // desaturation, the vignette, gamma encode and dither. `uv` is 0..1 across the output, `pixel` the
 // output pixel's position.
@@ -39,7 +43,7 @@ fn finish(colour: vec3f, uv: vec2f, pixel: vec2f) -> vec3f {
     let l = mix(l0, l0 * l0 * (3.0 - 2.0 * l0), 0.55);
     c *= l / max(l0, 1e-4);
     c = mix(c, vec3f(l), smoothstep_f(0.55, 1.0, l) * 0.1);
-    c = mix(vec3f(l), c, 0.93) + vec3f(0.008, 0.002, 0.0);
+    c = mix(vec3f(l), c, 0.93) + BLACK_FLOOR;
     let v = (uv - 0.5) * vec2f(1.0, 0.8);
     c *= 1.0 - 0.35 * dot(v, v);
     c = pow(max(c, vec3f(0.0)), vec3f(1.0 / 2.2));
