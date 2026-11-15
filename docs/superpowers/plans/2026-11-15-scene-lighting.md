@@ -1,4 +1,6 @@
-# Cove Scene Lighting Implementation Plan
+# Cove Scene Lighting Implementation Plan (Metal) — SUPERSEDED
+
+> **Superseded** by ADR 0008 (Rust + wgpu): the water model from the lighting design is implemented in WGSL as part of `2026-11-15-rust-scene-port-design.md`. Kept for its decisions (constants, checks, distances).
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
