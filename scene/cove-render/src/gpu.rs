@@ -25,6 +25,8 @@ pub enum RenderError {
     Readback(String),
     /// A file the scene needs (such as a whale model) is missing or broken.
     Asset(String),
+    /// The output format is sRGB. `finish()` gamma-encodes itself, so an sRGB output would encode twice.
+    SrgbOutput(wgpu::TextureFormat),
 }
 
 impl fmt::Display for RenderError {
@@ -34,6 +36,9 @@ impl fmt::Display for RenderError {
             RenderError::NoDevice(e) => write!(f, "cannot open the graphics device: {e}"),
             RenderError::Readback(e) => write!(f, "cannot read back from the GPU: {e}"),
             RenderError::Asset(e) => write!(f, "cannot load {e}"),
+            RenderError::SrgbOutput(format) => {
+                write!(f, "the output format {format:?} is sRGB; use its non-sRGB variant, the scene encodes itself")
+            }
         }
     }
 }
@@ -47,7 +52,7 @@ pub struct Renderer {
     adapter: wgpu::Adapter,
     device: wgpu::Device,
     queue: wgpu::Queue,
-    /// The format of the window's surface. It should not be an sRGB format: `finish()` encodes itself.
+    /// The format of the window's surface. It is never an sRGB format: `finish()` encodes itself.
     surface_format: wgpu::TextureFormat,
     scale: f32,
     targets: Option<Targets>,
@@ -84,6 +89,7 @@ impl Renderer {
 
     /// A renderer for a device the caller opened, drawing into outputs of `surface_format`. It loads the
     /// whale models from the assets (see [`whales::assets_dir`]) and fails if they cannot be read.
+    /// `surface_format` must not be an sRGB format, because `finish()` gamma-encodes itself.
     pub fn new(
         instance: wgpu::Instance,
         adapter: wgpu::Adapter,
@@ -91,6 +97,9 @@ impl Renderer {
         queue: wgpu::Queue,
         surface_format: wgpu::TextureFormat,
     ) -> Result<Self, RenderError> {
+        if surface_format.is_srgb() {
+            return Err(RenderError::SrgbOutput(surface_format));
+        }
         let ocean = Ocean::new(&device, &queue);
         let water = Water::new(&device, &ocean);
         let kelp = Kelp::new(&device, &queue, &ocean);

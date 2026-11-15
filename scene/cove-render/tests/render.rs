@@ -13,6 +13,20 @@ fn renders_on_any_adapter() {
 }
 
 #[test]
+fn refuses_srgb_outputs() {
+    // `finish()` gamma-encodes itself; an sRGB output would encode a second time.
+    let r = renderer();
+    let made = Renderer::new(
+        r.instance().clone(),
+        r.adapter().clone(),
+        r.device().clone(),
+        r.queue().clone(),
+        wgpu::TextureFormat::Bgra8UnormSrgb,
+    );
+    assert!(matches!(made, Err(cove_render::RenderError::SrgbOutput(_))));
+}
+
+#[test]
 fn sea_has_rough_open_sea_waves() {
     let s = renderer().sea_statistics(123.0).unwrap();
     let total = s.iter().map(|c| c.height_rms * c.height_rms).sum::<f64>().sqrt();

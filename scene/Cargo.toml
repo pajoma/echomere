@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["cove-scene", "cove-render"]
+members = ["cove-scene", "cove-render", "scene-preview"]
 
 # The disk is small and software rendering in debug is slow: no debug info, dependencies optimised.
 [profile.dev]
