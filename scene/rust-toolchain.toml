@@ -1,0 +1,4 @@
+# Built and tested with rustc/cargo 1.100.0 (0ef1bc386, 2026-11-09).
+# Pinned to "stable" because the disk cannot fit a second 1.100.0 install.
+[toolchain]
+channel = "stable"
