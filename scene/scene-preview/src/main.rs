@@ -179,10 +179,21 @@ fn write_snapshot(options: &Options, path: &str) -> Result<(), String> {
     let (width, height) = options.size;
     let image = renderer.snapshot(&frame, width, height).map_err(|e| format!("Snapshot failed: {e}"))?;
     image.save(path).map_err(|e| format!("Snapshot failed: {e}"))?;
+    // How far each whale is from the camera (on the seabed, 30 m down), to find frames with a near one.
+    let distances: Vec<String> = frame
+        .whales
+        .iter()
+        .map(|w| {
+            let [x, y, z] = w.position;
+            let y = y + scene_rules::CAMERA_DEPTH;
+            format!("{:.0} m", (x * x + y * y + z * z).sqrt())
+        })
+        .collect();
     println!(
-        "Wrote {path}: seed {}, {} whales, {} fish, {} kelp, {} echoes",
+        "Wrote {path}: seed {}, {} whales ({}), {} fish, {} kelp, {} echoes",
         options.seed,
         frame.whales.len(),
+        distances.join(", "),
         frame.creatures.len(),
         frame.kelp.len(),
         frame.echoes.len()
