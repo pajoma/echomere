@@ -36,12 +36,13 @@ comes first (`2026-11-15-scene-lighting-design.md`). So the port is the moment t
    - Whales: skinned meshes from the existing prepared files (`.mesh`, `.animation`, `.jpg`, formats in
      `tools/prepare-whales.py`), moved to `assets/whales/prepared/` with their `LICENSE.md` (ADR 0007).
    - Fish: as today.
-   - Lighting: the water model exactly as in the lighting design (one model for every element, linear light,
-     `finish()` per fragment, no extra pass, the designer's calls listed there).
+   - Lighting: the water model as in the lighting design (one model for every element, linear light, the
+     designer's calls listed there), except that `finish()` runs in the composite pass (see the calls below).
 4. **Runs on both platforms**: `cargo run -p scene-preview` opens the scene on macOS 14+ (Metal backend) and
    on Linux under Wayland and X11 (Vulkan, falling back to OpenGL). On this ChromeOS container it runs with
    "Linux GPU support" enabled, and without it on Mesa's software renderer (slow, but it runs).
-5. **Energy as before**: 15 fps, half resolution, no drawing while the window is hidden or occluded.
+5. **Energy as before**: 15 fps, half resolution (offscreen target plus one composite pass, see the calls
+   below), no drawing while the window is hidden or occluded.
 
 ## Non-goals
 
@@ -86,7 +87,26 @@ Designer's call, for the owner to check:
   what the owner wants to replace, so reproducing it first would be built only to be thrown away. Behaviour
   checks and framing still have to match the reference exactly; colours don't.
 - **The Swift package stays in the repository until the Rust scene passes every check**, then it is deleted
-  in one commit (history keeps it).
+  in one commit (history keeps it). Two more conditions before that commit: the owner has approved the look
+  (issue #7's "done when"), and the energy comparison below shows no regression.
+- **Half resolution through an offscreen target on every platform.** Linux surfaces don't scale up a smaller
+  drawable the way a macOS layer does. So the scene renders into a half-resolution `rgba16float` texture,
+  and one composite pass scales it to the window. That pass also does the lighting design's `finish()`
+  (exposure, tone map, S-curve, vignette, gamma, dither) once per pixel, instead of in every fragment shader.
+  This replaces the lighting design's "per-fragment finish, no extra pass" call. The new pass is one texture
+  read per screen pixel and costs less than the half-resolution scene saves. There's one code path, with no
+  platform branches.
+- **Energy is compared by hand, not by a harness.** The owner runs the Swift and the Rust preview side by
+  side on the Mac at the same window size and 15 fps, and compares "Energy Impact" in Activity Monitor. The
+  Rust value must not be clearly higher (about 10 % slack). `scene-preview --stats` prints the GPU time per
+  frame from wgpu timestamp queries where the adapter supports them, to help find the cause if it is.
+- **Tuning the look:** the first round of constants is tuned here from snapshots rendered on the software
+  adapter. The owner then judges and signs off on the Mac (and on Linux once the GPU is enabled). Software
+  and hardware rendering produce the same colours within rounding, so the first round isn't wasted.
+- **Determinism means "the same to the eye", not bit-identical.** The scene is a closed-form function of the
+  time. Nothing accumulates from frame to frame, so last-digit differences between the macOS and Linux maths
+  libraries stay at about 1e-12 m and never grow. No pure-Rust maths library is needed. The tests pin
+  determinism on one machine (same inputs, same frame) and use tolerances where they compare numbers.
 
 ## Left to the builder
 
