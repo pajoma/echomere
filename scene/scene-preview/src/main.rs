@@ -566,12 +566,15 @@ impl Stats {
         let _ = device.poll(wgpu::PollType::wait_indefinitely());
         self.cpu_ms += cpu_start.elapsed().as_secs_f64() * 1000.0;
         if let Some(t) = &self.timestamps {
-            if let Ok(range) = t.readback.slice(..).get_mapped_range() {
+            // Unmapped only if the mapping worked; unmapping a buffer that is not mapped is an error.
+            let ticks = t.readback.slice(..).get_mapped_range().ok().map(|range| {
                 let tick = |i: usize| u64::from_le_bytes(range[i * 8..i * 8 + 8].try_into().expect("8 bytes"));
-                let ticks = [tick(0), tick(1)];
-                self.gpu_ms += ticks[1].wrapping_sub(ticks[0]) as f64 * t.period_ns / 1e6;
+                [tick(0), tick(1)]
+            });
+            if let Some([start, end]) = ticks {
+                self.gpu_ms += end.wrapping_sub(start) as f64 * t.period_ns / 1e6;
+                t.readback.unmap();
             }
-            t.readback.unmap();
         }
         self.frames += 1;
         self.total_frames += 1;
