@@ -9,6 +9,7 @@ mod composite;
 mod gpu;
 mod ocean;
 mod targets;
+mod water;
 
 pub use gpu::{RenderError, Renderer};
 pub use ocean::SeaStatistics;

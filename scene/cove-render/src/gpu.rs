@@ -7,13 +7,10 @@ use cove_scene::scene::SceneFrame;
 use crate::composite::Composite;
 use crate::ocean::{self, Ocean, SeaStatistics, CASCADES, N};
 use crate::targets::{Targets, DEFAULT_SCALE};
+use crate::water::Water;
 
 /// The format snapshots are read back in. Not sRGB, because `finish()` gamma-encodes itself.
 const SNAPSHOT_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
-
-/// Open water while the water pass is not there yet: a constant, linear deep blue.
-// TODO(Task 5): replaced by the full-screen water pass.
-const OPEN_WATER_STUB: wgpu::Color = wgpu::Color { r: 0.010, g: 0.045, b: 0.085, a: 1.0 };
 
 #[derive(Debug)]
 pub enum RenderError {
@@ -49,7 +46,10 @@ pub struct Renderer {
     scale: f32,
     targets: Option<Targets>,
     ocean: Ocean,
+    water: Water,
     composite: Composite,
+    /// Shows the sea from 4 m above instead of the cove, for checking the waves.
+    sea_from_above: bool,
 }
 
 impl Renderer {
@@ -82,6 +82,7 @@ impl Renderer {
         surface_format: wgpu::TextureFormat,
     ) -> Self {
         let ocean = Ocean::new(&device, &queue);
+        let water = Water::new(&device, &ocean);
         let composite = Composite::new(&device);
         Renderer {
             instance,
@@ -92,7 +93,9 @@ impl Renderer {
             scale: DEFAULT_SCALE,
             targets: None,
             ocean,
+            water,
             composite,
+            sea_from_above: false,
         }
     }
 
@@ -117,6 +120,11 @@ impl Renderer {
         self.scale = scale.clamp(0.05, 1.0);
     }
 
+    /// Shows the sea from 4 m above, looking towards the sun, instead of the cove (a debug view).
+    pub fn set_sea_from_above(&mut self, on: bool) {
+        self.sea_from_above = on;
+    }
+
     /// Draws `frame` into `target`, an output of `size` pixels in the surface format.
     pub fn render(&mut self, frame: &SceneFrame, target: &wgpu::TextureView, size: (u32, u32)) {
         self.draw(frame, target, size, self.surface_format);
@@ -131,14 +139,15 @@ impl Renderer {
 
         let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("frame") });
         self.ocean.simulate(&self.queue, &mut encoder, frame.sea_time);
+        self.water.prepare(&self.queue, frame, scene_size, self.sea_from_above);
         {
-            let _scene = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            let mut scene = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("scene"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: &targets.color,
                     depth_slice: None,
                     resolve_target: None,
-                    ops: wgpu::Operations { load: wgpu::LoadOp::Clear(OPEN_WATER_STUB), store: wgpu::StoreOp::Store },
+                    ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::BLACK), store: wgpu::StoreOp::Store },
                 })],
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                     view: &targets.depth,
@@ -147,6 +156,7 @@ impl Renderer {
                 }),
                 ..Default::default()
             });
+            self.water.draw(&mut scene);
         }
         self.composite.draw(&self.device, &mut encoder, targets, output, format);
         self.queue.submit([encoder.finish()]);
