@@ -20,8 +20,8 @@ const SNOW_NEAR: f32 = 2.0;             // layer 1: the coarser, brighter, faste
 const SNOW_FAR: f32 = 6.0;              // layer 0: the fine, dim, slow flakes
 // The hand-picked echo and snow colours are display values; decoded they are far too faint to be seen
 // against the water. These lift them to a faint glow (echoes) and specks (snow).
-const ECHO_LIFT: f32 = 12.0;
-const SNOW_LIFT: f32 = 120.0;
+const ECHO_LIFT: f32 = 24.0;
+const SNOW_LIFT: f32 = 80.0;
 // Overall strength of the light shafts.
 const SHAFTS: f32 = 1.0;
 
