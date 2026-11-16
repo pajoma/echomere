@@ -27,7 +27,11 @@ fn no_light_on_horizon() {
 
 #[test]
 fn light_never_jumps() {
-    let max3 = |a: [f64; 3], b: [f64; 3]| (0..3).map(|i| a[i] - b[i]).fold(f64::NEG_INFINITY, f64::max);
+    let max3 = |a: [f64; 3], b: [f64; 3]| {
+        (0..3)
+            .map(|i| a[i] - b[i])
+            .fold(f64::NEG_INFINITY, f64::max)
+    };
     let mut largest: f64 = 0.0;
     for minute in 0..(24 * 60) {
         let a = sky::state(minute as f64 / 60.0);

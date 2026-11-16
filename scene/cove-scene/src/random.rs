@@ -12,6 +12,8 @@ impl SplitMix64 {
         Self { state: seed }
     }
 
+    // Name kept from the Swift port; this is not an `Iterator` (it never ends).
+    #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self) -> u64 {
         self.state = self.state.wrapping_add(0x9E37_79B9_7F4A_7C15);
         let mut z = self.state;

@@ -7,7 +7,13 @@ use cove_scene::sky;
 #[test]
 fn kelp_grows_where_giant_kelp_grows() {
     let kelp = munich_bay().layout.kelp;
-    assert!(!kelp.is_empty() && kelp.iter().all(|k| k.base_depth >= 15.0 && k.base_depth <= 30.0 && k.length > k.base_depth && k.length < 46.0));
+    assert!(
+        !kelp.is_empty()
+            && kelp.iter().all(|k| k.base_depth >= 15.0
+                && k.base_depth <= 30.0
+                && k.length > k.base_depth
+                && k.length < 46.0)
+    );
 }
 
 #[test]
@@ -47,7 +53,14 @@ fn small_fish_move_smoothly_from_one_frame_to_the_next() {
 #[test]
 fn small_fish_swim_in_schools_of_twenty_or_more() {
     let f = munich_bay().frame(NOON, &guests(), &traces());
-    assert!(!f.creatures.is_empty() && munich_bay().layout.schools.iter().all(|s| s.members.len() >= 20));
+    assert!(
+        !f.creatures.is_empty()
+            && munich_bay()
+                .layout
+                .schools
+                .iter()
+                .all(|s| s.members.len() >= 20)
+    );
 }
 
 #[test]

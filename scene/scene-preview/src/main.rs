@@ -110,12 +110,18 @@ impl Options {
             return None;
         }
         let start = self.hour.unwrap_or(5.0);
-        Some(sky::state(start + self.day_seconds.map_or(0.0, |d| elapsed * 24.0 / d)))
+        Some(sky::state(
+            start + self.day_seconds.map_or(0.0, |d| elapsed * 24.0 / d),
+        ))
     }
 
     /// The scene time at the start: `--at`, or now.
     fn start_time(&self) -> f64 {
-        self.at.unwrap_or_else(|| SystemTime::now().duration_since(UNIX_EPOCH).map_or(0.0, |d| d.as_secs_f64()))
+        self.at.unwrap_or_else(|| {
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map_or(0.0, |d| d.as_secs_f64())
+        })
     }
 }
 
@@ -177,8 +183,12 @@ fn write_snapshot(options: &Options, path: &str) -> Result<(), String> {
     let cove = Cove::new(options.seed, options, time - 600.0, time);
     let frame = cove.frame(time, options.sky(0.0));
     let (width, height) = options.size;
-    let image = renderer.snapshot(&frame, width, height).map_err(|e| format!("Snapshot failed: {e}"))?;
-    image.save(path).map_err(|e| format!("Snapshot failed: {e}"))?;
+    let image = renderer
+        .snapshot(&frame, width, height)
+        .map_err(|e| format!("Snapshot failed: {e}"))?;
+    image
+        .save(path)
+        .map_err(|e| format!("Snapshot failed: {e}"))?;
     // How far each whale is from the camera (on the seabed, 30 m down), to find frames with a near one.
     let distances: Vec<String> = frame
         .whales
@@ -212,9 +222,13 @@ fn write_frames(options: &Options, directory: &str) -> Result<(), String> {
     for index in 0..count {
         let elapsed = index as f64 / fps;
         let frame = cove.frame(start + elapsed * options.speed, options.sky(elapsed));
-        let image = renderer.snapshot(&frame, width, height).map_err(|e| format!("Frames failed: {e}"))?;
+        let image = renderer
+            .snapshot(&frame, width, height)
+            .map_err(|e| format!("Frames failed: {e}"))?;
         let path = Path::new(directory).join(format!("frame-{index:05}.png"));
-        image.save(&path).map_err(|e| format!("Frames failed: {e}"))?;
+        image
+            .save(&path)
+            .map_err(|e| format!("Frames failed: {e}"))?;
     }
     println!("Wrote {count} frames to {directory}");
     Ok(())
@@ -223,9 +237,17 @@ fn write_frames(options: &Options, directory: &str) -> Result<(), String> {
 fn run_window(options: Options) -> Result<(), String> {
     let event_loop = EventLoop::new().map_err(|e| format!("No window system: {e}"))?;
     // A check without hands: SCENE_PREVIEW_SELF_TEST=1 resizes the window after 6 s and quits after 12 s.
-    let self_test = std::env::var_os("SCENE_PREVIEW_SELF_TEST").map(|_| SelfTest { resized: false });
-    let mut app = Preview { options, state: None, error: None, self_test };
-    event_loop.run_app(&mut app).map_err(|e| format!("Window failed: {e}"))?;
+    let self_test =
+        std::env::var_os("SCENE_PREVIEW_SELF_TEST").map(|_| SelfTest { resized: false });
+    let mut app = Preview {
+        options,
+        state: None,
+        error: None,
+        self_test,
+    };
+    event_loop
+        .run_app(&mut app)
+        .map_err(|e| format!("Window failed: {e}"))?;
     match app.error {
         Some(error) => Err(error),
         None => Ok(()),
@@ -266,12 +288,19 @@ impl WindowState {
         let attributes = Window::default_attributes()
             .with_title(format!("Echomere: cove {}", options.seed))
             .with_inner_size(winit::dpi::LogicalSize::new(1280.0, 800.0));
-        let window = Arc::new(event_loop.create_window(attributes).map_err(|e| format!("No window: {e}"))?);
+        let window = Arc::new(
+            event_loop
+                .create_window(attributes)
+                .map_err(|e| format!("No window: {e}"))?,
+        );
 
         let display = event_loop.owned_display_handle();
-        let instance =
-            wgpu::Instance::new(wgpu::InstanceDescriptor::new_with_display_handle_from_env(Box::new(display)));
-        let surface = instance.create_surface(window.clone()).map_err(|e| format!("No surface: {e}"))?;
+        let instance = wgpu::Instance::new(
+            wgpu::InstanceDescriptor::new_with_display_handle_from_env(Box::new(display)),
+        );
+        let surface = instance
+            .create_surface(window.clone())
+            .map_err(|e| format!("No surface: {e}"))?;
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
             power_preference: wgpu::PowerPreference::LowPower,
             compatible_surface: Some(&surface),
@@ -279,10 +308,15 @@ impl WindowState {
         }))
         .map_err(|e| format!("No graphics adapter: {e}"))?;
         // Timestamps only when asked for, and only if the adapter has them.
-        let timestamps = options.stats && adapter.features().contains(wgpu::Features::TIMESTAMP_QUERY);
+        let timestamps =
+            options.stats && adapter.features().contains(wgpu::Features::TIMESTAMP_QUERY);
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
             label: Some("cove preview"),
-            required_features: if timestamps { wgpu::Features::TIMESTAMP_QUERY } else { wgpu::Features::empty() },
+            required_features: if timestamps {
+                wgpu::Features::TIMESTAMP_QUERY
+            } else {
+                wgpu::Features::empty()
+            },
             ..Default::default()
         }))
         .map_err(|e| format!("Cannot open the graphics device: {e}"))?;
@@ -296,7 +330,9 @@ impl WindowState {
         config.view_formats.clear();
         surface.configure(&device, &config);
 
-        let stats = options.stats.then(|| Stats::new(&device, &queue, timestamps));
+        let stats = options
+            .stats
+            .then(|| Stats::new(&device, &queue, timestamps));
         if options.stats {
             println!(
                 "Adapter: {} ({:?}), surface {:?} {}x{}, GPU timestamps: {}",
@@ -305,7 +341,11 @@ impl WindowState {
                 config.format,
                 config.width,
                 config.height,
-                if timestamps { "yes" } else { "no (CPU time only)" }
+                if timestamps {
+                    "yes"
+                } else {
+                    "no (CPU time only)"
+                }
             );
         }
         let mut renderer = Renderer::new(instance, adapter, device, queue, config.format)
@@ -363,7 +403,8 @@ impl WindowState {
             return;
         }
         let texture = match self.surface.get_current_texture() {
-            wgpu::CurrentSurfaceTexture::Success(t) | wgpu::CurrentSurfaceTexture::Suboptimal(t) => t,
+            wgpu::CurrentSurfaceTexture::Success(t)
+            | wgpu::CurrentSurfaceTexture::Suboptimal(t) => t,
             wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
                 self.surface.configure(self.renderer.device(), &self.config);
                 return;
@@ -371,13 +412,18 @@ impl WindowState {
             // Skip this frame and try again at the next.
             _ => return,
         };
-        let view = texture.texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let frame = self.cove.frame(self.now(options), options.sky(self.elapsed()));
+        let view = texture
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
+        let frame = self
+            .cove
+            .frame(self.now(options), options.sky(self.elapsed()));
         let cpu = Instant::now();
         if let Some(stats) = &self.stats {
             stats.begin(self.renderer.device(), self.renderer.queue());
         }
-        self.renderer.render(&frame, &view, (self.config.width, self.config.height));
+        self.renderer
+            .render(&frame, &view, (self.config.width, self.config.height));
         if let Some(stats) = &mut self.stats {
             stats.end(self.renderer.device(), self.renderer.queue(), cpu);
         }
@@ -435,10 +481,18 @@ impl ApplicationHandler for Preview {
                 }
             }
             WindowEvent::KeyboardInput {
-                event: KeyEvent { logical_key, state: ElementState::Pressed, repeat: false, .. },
+                event:
+                    KeyEvent {
+                        logical_key,
+                        state: ElementState::Pressed,
+                        repeat: false,
+                        ..
+                    },
                 ..
             } => match logical_key {
-                Key::Named(NamedKey::Space) => state.load_cove(state.seed.wrapping_add(1), &self.options),
+                Key::Named(NamedKey::Space) => {
+                    state.load_cove(state.seed.wrapping_add(1), &self.options)
+                }
                 Key::Named(NamedKey::Escape) => event_loop.exit(),
                 _ => {}
             },
@@ -454,7 +508,9 @@ impl ApplicationHandler for Preview {
             if elapsed >= 6.0 && !test.resized {
                 test.resized = true;
                 println!("Self-test: asking for 800x500");
-                let _ = state.window.request_inner_size(winit::dpi::PhysicalSize::new(800, 500));
+                let _ = state
+                    .window
+                    .request_inner_size(winit::dpi::PhysicalSize::new(800, 500));
             }
             if elapsed >= 12.0 {
                 println!("Self-test: quitting");
@@ -479,7 +535,11 @@ impl ApplicationHandler for Preview {
 
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
         if let Some(stats) = self.state.as_ref().and_then(|s| s.stats.as_ref()) {
-            println!("Drew {} frames in {:.1} s", stats.total_frames, stats.since_start.elapsed().as_secs_f64());
+            println!(
+                "Drew {} frames in {:.1} s",
+                stats.total_frames,
+                stats.since_start.elapsed().as_secs_f64()
+            );
         }
     }
 }
@@ -526,13 +586,23 @@ impl Stats {
             period_ns: f64::from(queue.get_timestamp_period()),
         });
         let now = Instant::now();
-        Stats { timestamps, since_start: now, window_start: now, frames: 0, total_frames: 0, gpu_ms: 0.0, cpu_ms: 0.0 }
+        Stats {
+            timestamps,
+            since_start: now,
+            window_start: now,
+            frames: 0,
+            total_frames: 0,
+            gpu_ms: 0.0,
+            cpu_ms: 0.0,
+        }
     }
 
     /// An empty pass that writes a timestamp, submitted before the frame.
     fn begin(&self, device: &wgpu::Device, queue: &wgpu::Queue) {
         if let Some(t) = &self.timestamps {
-            let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("begin") });
+            let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("begin"),
+            });
             encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("frame begins"),
                 timestamp_writes: Some(wgpu::ComputePassTimestampWrites {
@@ -548,7 +618,8 @@ impl Stats {
     /// The closing timestamp; waits for the frame to finish and adds it up.
     fn end(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, cpu_start: Instant) {
         if let Some(t) = &self.timestamps {
-            let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("end") });
+            let mut encoder = device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("end") });
             encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("frame ends"),
                 timestamp_writes: Some(wgpu::ComputePassTimestampWrites {
@@ -568,7 +639,9 @@ impl Stats {
         if let Some(t) = &self.timestamps {
             // Unmapped only if the mapping worked; unmapping a buffer that is not mapped is an error.
             let ticks = t.readback.slice(..).get_mapped_range().ok().map(|range| {
-                let tick = |i: usize| u64::from_le_bytes(range[i * 8..i * 8 + 8].try_into().expect("8 bytes"));
+                let tick = |i: usize| {
+                    u64::from_le_bytes(range[i * 8..i * 8 + 8].try_into().expect("8 bytes"))
+                };
                 [tick(0), tick(1)]
             });
             if let Some([start, end]) = ticks {
@@ -581,7 +654,11 @@ impl Stats {
         let seconds = self.window_start.elapsed().as_secs_f64();
         if seconds >= 1.0 {
             let n = f64::from(self.frames);
-            let gpu = if self.timestamps.is_some() { format!("{:.1} ms", self.gpu_ms / n) } else { "n/a".into() };
+            let gpu = if self.timestamps.is_some() {
+                format!("{:.1} ms", self.gpu_ms / n)
+            } else {
+                "n/a".into()
+            };
             println!(
                 "{:.1} fps, GPU {gpu} per frame, CPU+wait {:.1} ms per frame, {} frames so far",
                 n / seconds,

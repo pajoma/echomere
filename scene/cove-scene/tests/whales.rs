@@ -14,7 +14,13 @@ fn whale_fades_in_over_two_minutes() {
     let arriving = [visitor("new", NOON, WhaleSpecies::SouthernRightWhale)];
     let o: Vec<f64> = [0.0, 60.0, 120.0, 600.0]
         .iter()
-        .map(|d| munich_bay().frame(NOON + d, &arriving, &[]).whales.first().map_or(-1.0, |w| w.opacity))
+        .map(|d| {
+            munich_bay()
+                .frame(NOON + d, &arriving, &[])
+                .whales
+                .first()
+                .map_or(-1.0, |w| w.opacity)
+        })
         .collect();
     println!("opacities {o:?}");
     assert!(o[0] == 0.0 && o[1] > 0.4 && o[1] < 0.6 && o[2] == 1.0 && o[3] == 1.0);
@@ -23,7 +29,13 @@ fn whale_fades_in_over_two_minutes() {
 #[test]
 fn at_most_six_whales_are_drawn() {
     let crowd: Vec<_> = (0..8)
-        .map(|i| visitor(&format!("crowd-{i}"), NOON - (8 - i) as f64 * HOUR, WhaleSpecies::SouthernRightWhale))
+        .map(|i| {
+            visitor(
+                &format!("crowd-{i}"),
+                NOON - (8 - i) as f64 * HOUR,
+                WhaleSpecies::SouthernRightWhale,
+            )
+        })
         .collect();
     let crowded = munich_bay().frame(NOON, &crowd, &[]);
     assert_eq!(crowded.whales.len(), scene_rules::MAX_WHALES);
@@ -45,7 +57,14 @@ fn day_stats() -> DayStats {
     let (mut fastest, mut shallowest, mut deepest) = (0.0f64, -100.0f64, 0.0f64);
     let mut previous: Option<cove_scene::scene::WhalePose> = None;
     for step in stride(DAY, 20.0) {
-        let Some(whale) = scene.frame(NOON + step, &g[..1], &[]).whales.into_iter().next() else { continue };
+        let Some(whale) = scene
+            .frame(NOON + step, &g[..1], &[])
+            .whales
+            .into_iter()
+            .next()
+        else {
+            continue;
+        };
         samples += 1;
         if let Some((x, y, d)) = camera::project(whale.position, 1.6) {
             if x > -0.1 && x < 1.1 && y > -0.1 && y < 1.1 && d < 110.0 {
@@ -103,9 +122,17 @@ fn whale_swims_at_a_whales_pace() {
 fn breathing_stats() -> (usize, usize, f64) {
     let scene = munich_bay();
     let g = guests();
-    let (mut breaths, mut visits, mut was_up, mut last, mut deepest) = (0usize, 0usize, false, -1000.0f64, 0.0f64);
+    let (mut breaths, mut visits, mut was_up, mut last, mut deepest) =
+        (0usize, 0usize, false, -1000.0f64, 0.0f64);
     for step in stride(2.0 * HOUR, 1.0) {
-        let Some(w) = scene.frame(NOON + step, &g[..1], &[]).whales.into_iter().next() else { continue };
+        let Some(w) = scene
+            .frame(NOON + step, &g[..1], &[])
+            .whales
+            .into_iter()
+            .next()
+        else {
+            continue;
+        };
         let up = w.position[1] > -0.1 * w.length;
         if up && !was_up {
             breaths += 1;
@@ -124,7 +151,7 @@ fn breathing_stats() -> (usize, usize, f64) {
 fn whale_breathes_several_times_at_a_time() {
     let (b, v, _) = breathing_stats();
     println!("{b} breaths in {v} visits (visits 8..=20, breaths 4..=6 per visit)");
-    assert!(v >= 8 && v <= 20 && b >= v * 4 && b <= v * 6);
+    assert!((8..=20).contains(&v) && (v * 4..=v * 6).contains(&b));
 }
 
 #[test]

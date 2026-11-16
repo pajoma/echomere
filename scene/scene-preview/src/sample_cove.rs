@@ -9,11 +9,19 @@ pub fn visitors(seed: u64, count: usize, now: f64) -> Vec<Visitor> {
             creature_id: format!("sample-{seed}-{i}"),
             // Orcas and right whales in turn, so a cove of five has a pod of three orcas.
             look: WhaleLook::new(
-                if i % 2 == 0 { WhaleSpecies::Orca } else { WhaleSpecies::SouthernRightWhale },
+                if i % 2 == 0 {
+                    WhaleSpecies::Orca
+                } else {
+                    WhaleSpecies::SouthernRightWhale
+                },
                 0.85 + 0.12 * (i % 3) as f64,
             ),
             // The last one arrives a moment after start, to show the fade-in.
-            arrived_at: if i == count - 1 && count > 1 { now + 5.0 } else { now - 3600.0 * (i + 1) as f64 },
+            arrived_at: if i == count - 1 && count > 1 {
+                now + 5.0
+            } else {
+                now - 3600.0 * (i + 1) as f64
+            },
         })
         .collect()
 }

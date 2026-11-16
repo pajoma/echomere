@@ -12,7 +12,11 @@ pub(crate) struct Composite {
 
 impl Composite {
     pub fn new(device: &wgpu::Device) -> Self {
-        let source = [include_str!("../shaders/common.wgsl"), include_str!("../shaders/composite.wgsl")].concat();
+        let source = [
+            include_str!("../shaders/common.wgsl"),
+            include_str!("../shaders/composite.wgsl"),
+        ]
+        .concat();
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("composite"),
             source: wgpu::ShaderSource::Wgsl(source.into()),
@@ -23,10 +27,18 @@ impl Composite {
             min_filter: wgpu::FilterMode::Linear,
             ..Default::default()
         });
-        Composite { module, sampler, pipelines: Vec::new() }
+        Composite {
+            module,
+            sampler,
+            pipelines: Vec::new(),
+        }
     }
 
-    fn pipeline(&mut self, device: &wgpu::Device, format: wgpu::TextureFormat) -> &wgpu::RenderPipeline {
+    fn pipeline(
+        &mut self,
+        device: &wgpu::Device,
+        format: wgpu::TextureFormat,
+    ) -> &wgpu::RenderPipeline {
         if let Some(i) = self.pipelines.iter().position(|(f, _)| *f == format) {
             return &self.pipelines[i].1;
         }
@@ -73,8 +85,14 @@ impl Composite {
             label: Some("composite"),
             layout: &pipeline.get_bind_group_layout(0),
             entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&targets.color) },
-                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&self.sampler) },
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&targets.color),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&self.sampler),
+                },
             ],
         });
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -83,7 +101,10 @@ impl Composite {
                 view: output,
                 depth_slice: None,
                 resolve_target: None,
-                ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::BLACK), store: wgpu::StoreOp::Store },
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                    store: wgpu::StoreOp::Store,
+                },
             })],
             ..Default::default()
         });

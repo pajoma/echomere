@@ -66,7 +66,11 @@ pub(crate) struct Kelp {
 
 impl Kelp {
     pub fn new(device: &wgpu::Device, queue: &wgpu::Queue, ocean: &Ocean) -> Self {
-        let source = [include_str!("../shaders/common.wgsl"), include_str!("../shaders/kelp.wgsl")].concat();
+        let source = [
+            include_str!("../shaders/common.wgsl"),
+            include_str!("../shaders/kelp.wgsl"),
+        ]
+        .concat();
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("kelp"),
             source: wgpu::ShaderSource::Wgsl(source.into()),
@@ -79,7 +83,10 @@ impl Kelp {
         let mesh_attributes = [float4(0)];
         let frond_attributes = [
             float4(1),
-            wgpu::VertexAttribute { offset: 16, ..float4(2) },
+            wgpu::VertexAttribute {
+                offset: 16,
+                ..float4(2)
+            },
         ];
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("kelp"),
@@ -102,7 +109,10 @@ impl Kelp {
                 ],
             },
             // Blades and the stalk ribbon are seen from both sides.
-            primitive: wgpu::PrimitiveState { cull_mode: None, ..Default::default() },
+            primitive: wgpu::PrimitiveState {
+                cull_mode: None,
+                ..Default::default()
+            },
             depth_stencil: Some(wgpu::DepthStencilState {
                 format: DEPTH_FORMAT,
                 depth_write_enabled: Some(true),
@@ -136,8 +146,16 @@ impl Kelp {
             queue.write_buffer(&b, 0, contents);
             b
         };
-        let vertices = buffer("kelp vertices", wgpu::BufferUsages::VERTEX, bytemuck::cast_slice(&mesh));
-        let indices = buffer("kelp indices", wgpu::BufferUsages::INDEX, bytemuck::cast_slice(&index_data));
+        let vertices = buffer(
+            "kelp vertices",
+            wgpu::BufferUsages::VERTEX,
+            bytemuck::cast_slice(&mesh),
+        );
+        let indices = buffer(
+            "kelp indices",
+            wgpu::BufferUsages::INDEX,
+            bytemuck::cast_slice(&index_data),
+        );
 
         let uniforms = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("kelp uniforms"),
@@ -154,17 +172,28 @@ impl Kelp {
             mipmap_filter: wgpu::MipmapFilterMode::Linear,
             ..Default::default()
         });
-        let displacement = ocean.displacement.create_view(&wgpu::TextureViewDescriptor {
-            dimension: Some(wgpu::TextureViewDimension::D2Array),
-            ..Default::default()
-        });
+        let displacement = ocean
+            .displacement
+            .create_view(&wgpu::TextureViewDescriptor {
+                dimension: Some(wgpu::TextureViewDimension::D2Array),
+                ..Default::default()
+            });
         let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("kelp"),
             layout: &pipeline.get_bind_group_layout(0),
             entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: uniforms.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&displacement) },
-                wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::Sampler(&sampler) },
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: uniforms.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&displacement),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(&sampler),
+                },
             ],
         });
         let capacity = 64;
@@ -194,7 +223,14 @@ impl Kelp {
     /// Uploads the frame's fronds and uniforms. Call before submitting the encoder that holds
     /// [`Kelp::draw`]. `size` is the scene target's size in pixels;
     /// nothing is drawn when `visible` is false.
-    pub fn prepare(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, frame: &SceneFrame, size: (u32, u32), visible: bool) {
+    pub fn prepare(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        frame: &SceneFrame,
+        size: (u32, u32),
+        visible: bool,
+    ) {
         self.count = if visible { frame.kelp.len() as u32 } else { 0 };
         if self.count == 0 {
             return;
@@ -205,8 +241,18 @@ impl Kelp {
         }
         let mut fronds: Vec<[f32; 4]> = Vec::with_capacity(frame.kelp.len() * 2);
         for f in &frame.kelp {
-            fronds.push([f.base_x as f32, f.base_depth as f32, f.base_z as f32, f.length as f32]);
-            fronds.push([f.sway_phase as f32, f.twist_phase as f32, f.blade_seed as f32, f.blade_scale as f32]);
+            fronds.push([
+                f.base_x as f32,
+                f.base_depth as f32,
+                f.base_z as f32,
+                f.length as f32,
+            ]);
+            fronds.push([
+                f.sway_phase as f32,
+                f.twist_phase as f32,
+                f.blade_seed as f32,
+                f.blade_scale as f32,
+            ]);
         }
         queue.write_buffer(&self.fronds, 0, bytemuck::cast_slice(&fronds));
 
@@ -214,7 +260,12 @@ impl Kelp {
         let m = &frame.kelp_motion;
         let v = |a: [f64; 3], w: f64| [a[0] as f32, a[1] as f32, a[2] as f32, w as f32];
         let uniforms = [
-            [(size.0 as f64 / size.1 as f64) as f32, m.surge as f32, m.drift as f32, m.flutter as f32],
+            [
+                (size.0 as f64 / size.1 as f64) as f32,
+                m.surge as f32,
+                m.drift as f32,
+                m.flutter as f32,
+            ],
             [1.0 / size.1 as f32, 0.0, 0.0, 0.0],
             v(sky.light_direction, sky.light_intensity),
             v(sky.light_colour, sky.ambient),

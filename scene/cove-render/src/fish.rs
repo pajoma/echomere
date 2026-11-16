@@ -62,9 +62,16 @@ impl Fish {
         let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("fish"),
             layout: &pipeline.get_bind_group_layout(0),
-            entries: &[wgpu::BindGroupEntry { binding: 0, resource: scene_buffer.as_entire_binding() }],
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: scene_buffer.as_entire_binding(),
+            }],
         });
-        Fish { pipeline, group, visible: false }
+        Fish {
+            pipeline,
+            group,
+            visible: false,
+        }
     }
 
     /// Decides whether the fish are drawn this frame. The scene buffer is uploaded by the water pass.

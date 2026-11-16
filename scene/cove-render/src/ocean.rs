@@ -122,8 +122,13 @@ impl Ocean {
                 mapped_at_creation: false,
             })
         };
-        let (h0, spec_a, spec_b, rows_a, rows_b) =
-            (buffer("h0"), buffer("spectrum a"), buffer("spectrum b"), buffer("rows a"), buffer("rows b"));
+        let (h0, spec_a, spec_b, rows_a, rows_b) = (
+            buffer("h0"),
+            buffer("spectrum a"),
+            buffer("spectrum b"),
+            buffer("rows a"),
+            buffer("rows b"),
+        );
         let settings = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("ocean settings"),
             size: std::mem::size_of::<OceanSettings>() as u64,
@@ -134,7 +139,11 @@ impl Ocean {
         let texture = |label, mips| {
             device.create_texture(&wgpu::TextureDescriptor {
                 label: Some(label),
-                size: wgpu::Extent3d { width: N, height: N, depth_or_array_layers: CASCADES },
+                size: wgpu::Extent3d {
+                    width: N,
+                    height: N,
+                    depth_or_array_layers: CASCADES,
+                },
                 mip_level_count: mips,
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
@@ -160,7 +169,10 @@ impl Ocean {
         let bind = |pipeline: &wgpu::ComputePipeline, entries: &[(u32, wgpu::BindingResource)]| {
             let entries: Vec<_> = entries
                 .iter()
-                .map(|(binding, resource)| wgpu::BindGroupEntry { binding: *binding, resource: resource.clone() })
+                .map(|(binding, resource)| wgpu::BindGroupEntry {
+                    binding: *binding,
+                    resource: resource.clone(),
+                })
                 .collect();
             device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: None,
@@ -170,7 +182,13 @@ impl Ocean {
         };
 
         let init = pipeline("ocean_init");
-        let init_group = bind(&init, &[(0, settings.as_entire_binding()), (1, h0.as_entire_binding())]);
+        let init_group = bind(
+            &init,
+            &[
+                (0, settings.as_entire_binding()),
+                (1, h0.as_entire_binding()),
+            ],
+        );
 
         let evolve = pipeline("ocean_evolve");
         let evolve_group = bind(
@@ -228,7 +246,11 @@ impl Ocean {
             .collect();
 
         // The spectrum never changes: compute it once.
-        queue.write_buffer(&settings, 0, bytemuck::bytes_of(&OceanSettings::from_sea_time(0.0)));
+        queue.write_buffer(
+            &settings,
+            0,
+            bytemuck::bytes_of(&OceanSettings::from_sea_time(0.0)),
+        );
         let mut encoder = device.create_command_encoder(&Default::default());
         {
             let mut pass = encoder.begin_compute_pass(&Default::default());
@@ -253,7 +275,11 @@ impl Ocean {
 
     /// Simulates the sea at `sea_time` (seconds within the loop) into the ocean textures.
     pub fn simulate(&self, queue: &wgpu::Queue, encoder: &mut wgpu::CommandEncoder, sea_time: f64) {
-        queue.write_buffer(&self.settings, 0, bytemuck::bytes_of(&OceanSettings::from_sea_time(sea_time)));
+        queue.write_buffer(
+            &self.settings,
+            0,
+            bytemuck::bytes_of(&OceanSettings::from_sea_time(sea_time)),
+        );
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some("ocean"),
             timestamp_writes: None,

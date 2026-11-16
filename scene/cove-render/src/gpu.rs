@@ -70,7 +70,8 @@ impl Renderer {
     /// A renderer without a window, for snapshots and checks. It takes a hardware adapter if there is
     /// one, and otherwise a software one (lavapipe on Linux).
     pub fn new_headless() -> Result<Self, RenderError> {
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
+        let instance =
+            wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
         let request = |fallback| {
             pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
                 power_preference: wgpu::PowerPreference::LowPower,
@@ -78,7 +79,9 @@ impl Renderer {
                 ..Default::default()
             }))
         };
-        let adapter = request(false).or_else(|_| request(true)).map_err(|e| RenderError::NoAdapter(e.to_string()))?;
+        let adapter = request(false)
+            .or_else(|_| request(true))
+            .map_err(|e| RenderError::NoAdapter(e.to_string()))?;
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
             label: Some("cove"),
             ..Default::default()
@@ -155,19 +158,43 @@ impl Renderer {
         self.draw(frame, target, size, self.surface_format);
     }
 
-    fn draw(&mut self, frame: &SceneFrame, output: &wgpu::TextureView, size: (u32, u32), format: wgpu::TextureFormat) {
+    fn draw(
+        &mut self,
+        frame: &SceneFrame,
+        output: &wgpu::TextureView,
+        size: (u32, u32),
+        format: wgpu::TextureFormat,
+    ) {
         let scene_size = Targets::scaled_size(size, self.scale);
         if self.targets.as_ref().map(|t| t.size) != Some(scene_size) {
             self.targets = Some(Targets::new(&self.device, scene_size));
         }
         let targets = self.targets.as_ref().expect("targets were just made");
 
-        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("frame") });
-        self.ocean.simulate(&self.queue, &mut encoder, frame.sea_time);
-        self.water.prepare(&self.queue, frame, scene_size, self.sea_from_above);
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("frame"),
+            });
+        self.ocean
+            .simulate(&self.queue, &mut encoder, frame.sea_time);
+        self.water
+            .prepare(&self.queue, frame, scene_size, self.sea_from_above);
         // The debug view of the sea from above has no kelp, whales or fish.
-        self.kelp.prepare(&self.device, &self.queue, frame, scene_size, !self.sea_from_above);
-        self.whales.prepare(&self.device, &self.queue, frame, scene_size, !self.sea_from_above);
+        self.kelp.prepare(
+            &self.device,
+            &self.queue,
+            frame,
+            scene_size,
+            !self.sea_from_above,
+        );
+        self.whales.prepare(
+            &self.device,
+            &self.queue,
+            frame,
+            scene_size,
+            !self.sea_from_above,
+        );
         self.fish.prepare(frame, !self.sea_from_above);
         {
             let mut scene = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -176,11 +203,17 @@ impl Renderer {
                     view: &targets.color,
                     depth_slice: None,
                     resolve_target: None,
-                    ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::BLACK), store: wgpu::StoreOp::Store },
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
                 })],
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                     view: &targets.depth,
-                    depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(1.0), store: wgpu::StoreOp::Store }),
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        store: wgpu::StoreOp::Store,
+                    }),
                     stencil_ops: None,
                 }),
                 ..Default::default()
@@ -190,15 +223,25 @@ impl Renderer {
             self.whales.draw(&mut scene);
             self.fish.draw(&mut scene);
         }
-        self.composite.draw(&self.device, &mut encoder, targets, output, format);
+        self.composite
+            .draw(&self.device, &mut encoder, targets, output, format);
         self.queue.submit([encoder.finish()]);
     }
 
     /// Draws `frame` at `width` x `height` and reads the picture back.
-    pub fn snapshot(&mut self, frame: &SceneFrame, width: u32, height: u32) -> Result<image::RgbaImage, RenderError> {
+    pub fn snapshot(
+        &mut self,
+        frame: &SceneFrame,
+        width: u32,
+        height: u32,
+    ) -> Result<image::RgbaImage, RenderError> {
         let texture = self.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("snapshot"),
-            size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
@@ -209,7 +252,8 @@ impl Renderer {
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
         self.draw(frame, &view, (width, height), SNAPSHOT_FORMAT);
 
-        let row = (width * 4).div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT) * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
+        let row = (width * 4).div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT)
+            * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
         let bytes = self.read_back(&texture, 0, row, height, 1)?;
         let mut pixels = Vec::with_capacity((width * height * 4) as usize);
         for y in 0..height as usize {
@@ -222,13 +266,18 @@ impl Renderer {
 
     /// Simulates the sea at `sea_time` and measures it, for checks and tuning.
     pub fn sea_statistics(&mut self, sea_time: f64) -> Result<Vec<SeaStatistics>, RenderError> {
-        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("sea") });
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("sea") });
         self.ocean.simulate(&self.queue, &mut encoder, sea_time);
         self.queue.submit([encoder.finish()]);
 
         let halves = |texture: &wgpu::Texture| -> Result<Vec<u16>, RenderError> {
             let bytes = self.read_back(texture, 0, N * 8, N, CASCADES)?;
-            Ok(bytes.chunks_exact(2).map(|b| u16::from_le_bytes([b[0], b[1]])).collect())
+            Ok(bytes
+                .chunks_exact(2)
+                .map(|b| u16::from_le_bytes([b[0], b[1]]))
+                .collect())
         };
         let displacement = halves(&self.ocean.displacement)?;
         let derivatives = halves(&self.ocean.derivatives)?;
@@ -259,7 +308,11 @@ impl Renderer {
             usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
             mapped_at_creation: false,
         });
-        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("readback") });
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("readback"),
+            });
         let extent = texture.size().mip_level_size(mip, texture.dimension());
         encoder.copy_texture_to_buffer(
             wgpu::TexelCopyTextureInfo {
@@ -276,14 +329,20 @@ impl Renderer {
                     rows_per_image: Some(rows),
                 },
             },
-            wgpu::Extent3d { width: extent.width, height: rows, depth_or_array_layers: layers },
+            wgpu::Extent3d {
+                width: extent.width,
+                height: rows,
+                depth_or_array_layers: layers,
+            },
         );
         self.queue.submit([encoder.finish()]);
 
         let (sender, receiver) = std::sync::mpsc::channel();
-        buffer.slice(..).map_async(wgpu::MapMode::Read, move |result| {
-            let _ = sender.send(result);
-        });
+        buffer
+            .slice(..)
+            .map_async(wgpu::MapMode::Read, move |result| {
+                let _ = sender.send(result);
+            });
         self.device
             .poll(wgpu::PollType::wait_indefinitely())
             .map_err(|e| RenderError::Readback(e.to_string()))?;

@@ -32,14 +32,21 @@ pub fn munich_bay() -> CoveScene {
 
 pub fn guests() -> Vec<Visitor> {
     vec![
-        visitor("whale-a", NOON - 5.0 * HOUR, WhaleSpecies::SouthernRightWhale),
+        visitor(
+            "whale-a",
+            NOON - 5.0 * HOUR,
+            WhaleSpecies::SouthernRightWhale,
+        ),
         visitor("whale-b", NOON - 2.0 * HOUR, WhaleSpecies::Orca),
         visitor("whale-c", NOON - HOUR, WhaleSpecies::SouthernRightWhale),
     ]
 }
 
 pub fn traces() -> Vec<Echo> {
-    vec![echo("whale-x", NOON - DAY), echo("whale-y", NOON - 3.0 * DAY)]
+    vec![
+        echo("whale-x", NOON - DAY),
+        echo("whale-y", NOON - 3.0 * DAY),
+    ]
 }
 
 /// Swift `stride(from: 0, to: end, by: step)` for whole-number steps.
@@ -64,7 +71,13 @@ pub fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
 pub fn track(id: &str, among: &[Visitor], start: f64, seconds: f64, every: f64) -> Vec<WhalePose> {
     let scene = munich_bay();
     stride(seconds, every)
-        .filter_map(|t| scene.frame(start + t, among, &[]).whales.into_iter().find(|w| w.id == id))
+        .filter_map(|t| {
+            scene
+                .frame(start + t, among, &[])
+                .whales
+                .into_iter()
+                .find(|w| w.id == id)
+        })
         .collect()
 }
 

@@ -90,14 +90,19 @@ fn cmp_f(a: f64, b: f64) -> Ordering {
 
 impl CoveScene {
     pub fn new(seed: CoveSeed) -> Self {
-        Self { seed, layout: CoveLayout::new(seed) }
+        Self {
+            seed,
+            layout: CoveLayout::new(seed),
+        }
     }
 
     pub fn frame(&self, at: f64, visitors: &[Visitor], echoes: &[Echo]) -> SceneFrame {
         let t = at;
 
         let mut present: Vec<&Visitor> = visitors.iter().filter(|v| v.arrived_at <= at).collect();
-        present.sort_by(|a, b| cmp_f(a.arrived_at, b.arrived_at).then_with(|| a.creature_id.cmp(&b.creature_id)));
+        present.sort_by(|a, b| {
+            cmp_f(a.arrived_at, b.arrived_at).then_with(|| a.creature_id.cmp(&b.creature_id))
+        });
         let whales: Vec<WhalePose> = present
             .into_iter()
             .take(scene_rules::MAX_WHALES)
@@ -118,7 +123,9 @@ impl CoveScene {
             .iter()
             .filter(|e| e.left_at <= at && at - e.left_at < scene_rules::ECHO_LIFETIME)
             .collect();
-        recent.sort_by(|a, b| cmp_f(b.left_at, a.left_at).then_with(|| b.creature_id.cmp(&a.creature_id)));
+        recent.sort_by(|a, b| {
+            cmp_f(b.left_at, a.left_at).then_with(|| b.creature_id.cmp(&a.creature_id))
+        });
         let echoes: Vec<EchoPose> = recent
             .into_iter()
             .take(scene_rules::MAX_ECHOES)
@@ -159,12 +166,18 @@ impl CoveScene {
             id: visitor.creature_id.clone(),
             species: visitor.look.species,
             position: path.position(t),
-            forward: [heading.sin() * pitch.cos(), pitch.sin(), heading.cos() * pitch.cos()],
+            forward: [
+                heading.sin() * pitch.cos(),
+                pitch.sin(),
+                heading.cos() * pitch.cos(),
+            ],
             roll: bank + 0.12 * (cycle(t, path.roll_period) + path.roll_phase).sin(),
             tail_phase: wrap_angle(cycle(t, path.tail_period) + path.tail_phase),
             length: visitor.look.length(),
             effort: (speed / 0.8).max(0.15).min(1.0),
-            opacity: (since_arrival / scene_rules::WHALE_FADE_IN).max(0.0).min(1.0),
+            opacity: (since_arrival / scene_rules::WHALE_FADE_IN)
+                .max(0.0)
+                .min(1.0),
         }
     }
 
@@ -177,10 +190,14 @@ impl CoveScene {
             Some((x, y, d)) => (Some(x), Some(y), Some(d)),
             None => (None, None, None),
         };
-        let pos_x = scene_rules::WORLD_CENTRE_X + (sx.unwrap_or(0.5) - 0.5) * scene_rules::WORLD_WIDTH;
+        let pos_x =
+            scene_rules::WORLD_CENTRE_X + (sx.unwrap_or(0.5) - 0.5) * scene_rules::WORLD_WIDTH;
         let pos_y = sy.unwrap_or(0.5).max(0.15).min(0.85);
         let pos_depth = (sd.unwrap_or(40.0) / 90.0).max(0.1).min(0.9);
-        let mut random = SplitMix64::new(combine(self.seed.0 ^ 0xEC40, stable_hash(&echo.creature_id)));
+        let mut random = SplitMix64::new(combine(
+            self.seed.0 ^ 0xEC40,
+            stable_hash(&echo.creature_id),
+        ));
         let call_period = random.range(900.0, 2400.0);
         let call_offset = random.range(0.0, call_period);
         let call_duration = 8.0;
@@ -210,7 +227,8 @@ impl CoveScene {
 fn fish_poses(school: &FishSchool, school_index: usize, t: f64) -> Vec<CreaturePose> {
     let ax = cycle(t, school.period_x) + school.phase_x;
     let centre_x = school.centre_x + school.amplitude_x * ax.sin();
-    let centre_y = school.centre_y + school.amplitude_y * (cycle(t, school.period_y) + school.phase_y).sin();
+    let centre_y =
+        school.centre_y + school.amplitude_y * (cycle(t, school.period_y) + school.phase_y).sin();
     let velocity_x = school.amplitude_x * (2.0 * PI / school.period_x) * ax.cos();
     let facing = (velocity_x / 0.002).tanh();
     school
@@ -294,7 +312,8 @@ impl Route {
     fn ground(&self, t: f64) -> [f64; 2] {
         let around = cycle(t, self.period_x) + self.phase_x;
         // The visit to the front: 0 for most of the time, rising to 1 for a short while.
-        let mut long = cycle(t, self.period_x * self.rounds_per_visit) + self.phase_x / self.rounds_per_visit;
+        let mut long =
+            cycle(t, self.period_x * self.rounds_per_visit) + self.phase_x / self.rounds_per_visit;
         long %= 2.0 * PI;
         if long > PI {
             long -= 2.0 * PI;
@@ -420,8 +439,13 @@ impl WhalePath {
             let daylight = sky::smooth(-6.0, 10.0, sky::sun_elevation(sky::hour(t)));
             dive_centre = (-14.0 + 8.0 * depth) * (1.0 - daylight) + dive_centre * daylight;
         }
-        let dive_y = dive_centre + self.above + 3.5 * (cycle(t, route.period_y) + route.phase_y).sin();
-        Breathing { at_surface, surface_y, dive_y }
+        let dive_y =
+            dive_centre + self.above + 3.5 * (cycle(t, route.period_y) + route.phase_y).sin();
+        Breathing {
+            at_surface,
+            surface_y,
+            dive_y,
+        }
     }
 
     fn position(&self, t: f64) -> [f64; 3] {
@@ -434,13 +458,21 @@ impl WhalePath {
         ground[0] += 0.5 * wander.sin();
         ground[1] += 0.5 * (wander + 1.3).sin();
         let b = self.breathing(t);
-        [ground[0], b.dive_y + (b.surface_y - b.dive_y) * b.at_surface, ground[1]]
+        [
+            ground[0],
+            b.dive_y + (b.surface_y - b.dive_y) * b.at_surface,
+            ground[1],
+        ]
     }
 
     /// Velocity in metres per second, measured over two seconds so it is steady.
     fn velocity(&self, t: f64) -> [f64; 3] {
         let (a, b) = (self.position(t + 1.0), self.position(t - 1.0));
-        [(a[0] - b[0]) / 2.0, (a[1] - b[1]) / 2.0, (a[2] - b[2]) / 2.0]
+        [
+            (a[0] - b[0]) / 2.0,
+            (a[1] - b[1]) / 2.0,
+            (a[2] - b[2]) / 2.0,
+        ]
     }
 
     /// The compass direction the whale points in, in radians: the direction it swims in, averaged over about

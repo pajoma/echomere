@@ -32,7 +32,11 @@ fn kelp_sways_with_swell() {
 
 #[test]
 fn kelp_sways_same_everywhere() {
-    let a = CoveScene::new(CoveSeed(4711)).frame(NOON, &[], &[]).kelp_motion;
-    let b = CoveScene::new(CoveSeed(9)).frame(NOON, &[], &[]).kelp_motion;
+    let a = CoveScene::new(CoveSeed(4711))
+        .frame(NOON, &[], &[])
+        .kelp_motion;
+    let b = CoveScene::new(CoveSeed(9))
+        .frame(NOON, &[], &[])
+        .kelp_motion;
     assert_eq!(a, b);
 }

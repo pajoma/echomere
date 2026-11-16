@@ -7,8 +7,9 @@ pub struct CoveSeed(pub u64);
 /// The kinds of whale a creator can choose from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum WhaleSpecies {
-    SouthernRightWhale,
-    Orca,
+    // The pod seed hashes `species as i64`: never reorder or renumber these.
+    SouthernRightWhale = 0,
+    Orca = 1,
 }
 
 impl WhaleSpecies {

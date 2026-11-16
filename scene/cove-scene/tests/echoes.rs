@@ -10,7 +10,9 @@ fn echo_older_than_seven_days_is_gone() {
 
 #[test]
 fn cove_shows_at_most_its_five_most_recent_echoes() {
-    let many: Vec<_> = (0..8).map(|i| echo(&format!("e{i}"), NOON - (i + 1) as f64 * HOUR)).collect();
+    let many: Vec<_> = (0..8)
+        .map(|i| echo(&format!("e{i}"), NOON - (i + 1) as f64 * HOUR))
+        .collect();
     let scene = munich_bay();
     let with = scene.frame(NOON, &[], &many);
     let first5 = scene.frame(NOON, &[], &many[..5]);
@@ -23,7 +25,10 @@ fn cove_shows_at_most_its_five_most_recent_echoes() {
 fn echo_grows_fainter_as_it_ages() {
     let scene = munich_bay();
     let fresh = scene.frame(NOON, &[], &[echo("e", NOON - HOUR)]).echoes[0].intensity;
-    let older = scene.frame(NOON, &[], &[echo("e", NOON - 5.0 * DAY)]).echoes[0].intensity;
+    let older = scene
+        .frame(NOON, &[], &[echo("e", NOON - 5.0 * DAY)])
+        .echoes[0]
+        .intensity;
     println!("fresh {fresh:.4}, older {older:.4}");
     assert!(fresh > older && older > 0.0);
 }

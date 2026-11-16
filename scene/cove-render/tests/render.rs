@@ -1,10 +1,10 @@
 //! Rendering checks. They run on any adapter, including a software one (lavapipe) without a GPU.
 
 use cove_render::{Renderer, WhaleModel};
-use std::path::Path;
 use cove_scene::model::{CoveSeed, Echo, Visitor, WhaleLook, WhaleSpecies};
 use cove_scene::scene::{CoveScene, SceneFrame};
 use cove_scene::sky;
+use std::path::Path;
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
 #[test]
@@ -29,7 +29,11 @@ fn refuses_srgb_outputs() {
 #[test]
 fn sea_has_rough_open_sea_waves() {
     let s = renderer().sea_statistics(123.0).unwrap();
-    let total = s.iter().map(|c| c.height_rms * c.height_rms).sum::<f64>().sqrt();
+    let total = s
+        .iter()
+        .map(|c| c.height_rms * c.height_rms)
+        .sum::<f64>()
+        .sqrt();
     assert!(total > 0.5 && total < 2.0, "height RMS {total}");
 }
 
@@ -43,7 +47,11 @@ const W: u32 = 320;
 const H: u32 = 200;
 
 fn visitor(id: &str, arrived: f64, species: WhaleSpecies) -> Visitor {
-    Visitor { creature_id: id.to_string(), look: WhaleLook::new(species, 1.0), arrived_at: arrived }
+    Visitor {
+        creature_id: id.to_string(),
+        look: WhaleLook::new(species, 1.0),
+        arrived_at: arrived,
+    }
 }
 
 fn echo(id: &str, left: f64) -> Echo {
@@ -57,11 +65,18 @@ fn echo(id: &str, left: f64) -> Echo {
 /// The frame every Swift rendering check draws: Munich bay at noon, with guests and echoes.
 fn frame() -> SceneFrame {
     let guests = [
-        visitor("whale-a", NOON - 5.0 * HOUR, WhaleSpecies::SouthernRightWhale),
+        visitor(
+            "whale-a",
+            NOON - 5.0 * HOUR,
+            WhaleSpecies::SouthernRightWhale,
+        ),
         visitor("whale-b", NOON - 2.0 * HOUR, WhaleSpecies::Orca),
         visitor("whale-c", NOON - HOUR, WhaleSpecies::SouthernRightWhale),
     ];
-    let traces = [echo("whale-x", NOON - DAY), echo("whale-y", NOON - 3.0 * DAY)];
+    let traces = [
+        echo("whale-x", NOON - DAY),
+        echo("whale-y", NOON - 3.0 * DAY),
+    ];
     CoveScene::new(CoveSeed(4_711)).frame(NOON, &guests, &traces)
 }
 
@@ -88,11 +103,24 @@ fn snapshot(r: &mut Renderer, f: &SceneFrame) -> image::RgbaImage {
 
 /// Pixels as RGB in 0..1, row-major from the top.
 fn rgb(image: &image::RgbaImage) -> Vec<[f64; 3]> {
-    image.pixels().map(|p| [p[0] as f64 / 255.0, p[1] as f64 / 255.0, p[2] as f64 / 255.0]).collect()
+    image
+        .pixels()
+        .map(|p| {
+            [
+                p[0] as f64 / 255.0,
+                p[1] as f64 / 255.0,
+                p[2] as f64 / 255.0,
+            ]
+        })
+        .collect()
 }
 
 fn mean_luma(pixels: &[[f64; 3]]) -> f64 {
-    pixels.iter().map(|c| 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]).sum::<f64>() / pixels.len() as f64
+    pixels
+        .iter()
+        .map(|c| 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2])
+        .sum::<f64>()
+        / pixels.len() as f64
 }
 
 fn luma_at(r: &mut Renderer, h: f64) -> f64 {
@@ -160,7 +188,10 @@ fn deep_is_blue() {
 fn no_black_or_nan_pixels_at_noon() {
     let mut r = renderer();
     let pixels = rgb(&snapshot(&mut r, &at_hour(12.0)));
-    let darkest = pixels.iter().map(|c| c[0] + c[1] + c[2]).fold(f64::MAX, f64::min);
+    let darkest = pixels
+        .iter()
+        .map(|c| c[0] + c[1] + c[2])
+        .fold(f64::MAX, f64::min);
     eprintln!("darkest r+g+b {darkest:.4}");
     assert!(darkest > 1.0 / 255.0, "darkest pixel r+g+b {darkest}");
 }
@@ -175,7 +206,6 @@ fn shader_time_wraps_daily() {
     later.time += 400.0 * DAY;
     assert!(snapshot(&mut r, &f) == snapshot(&mut r, &later));
 }
-
 
 #[test]
 fn kelp_is_drawn() {
@@ -192,7 +222,11 @@ fn kelp_is_drawn() {
         .count();
     let share = differing as f64 / (W * H) as f64;
     eprintln!("kelp changes {:.2} % of the pixels", share * 100.0);
-    assert!(share >= 0.001, "kelp changes only {:.3} % of the pixels", share * 100.0);
+    assert!(
+        share >= 0.001,
+        "kelp changes only {:.3} % of the pixels",
+        share * 100.0
+    );
 }
 
 /// The share of pixels in which two snapshots differ by more than 2 of 255 in some channel.
@@ -208,7 +242,13 @@ fn differing_share(a: &image::RgbaImage, b: &image::RgbaImage) -> f64 {
 #[test]
 fn missing_whale_file_is_an_error() {
     let r = renderer();
-    let err = WhaleModel::load(Path::new("/nonexistent"), WhaleSpecies::Orca, r.device(), r.queue()).unwrap_err();
+    let err = WhaleModel::load(
+        Path::new("/nonexistent"),
+        WhaleSpecies::Orca,
+        r.device(),
+        r.queue(),
+    )
+    .unwrap_err();
     assert!(err.to_string().contains("orca.mesh"), "{err}");
 }
 
@@ -217,7 +257,11 @@ fn missing_whale_file_is_an_error() {
 /// southern right whale 69 m away. Under the noon sky.
 fn whales_in_view() -> SceneFrame {
     let guests = [
-        visitor("whale-a", NOON - 5.0 * HOUR, WhaleSpecies::SouthernRightWhale),
+        visitor(
+            "whale-a",
+            NOON - 5.0 * HOUR,
+            WhaleSpecies::SouthernRightWhale,
+        ),
         visitor("whale-b", NOON - 2.0 * HOUR, WhaleSpecies::Orca),
         visitor("whale-c", NOON - HOUR, WhaleSpecies::SouthernRightWhale),
     ];
@@ -236,7 +280,11 @@ fn whales_are_drawn() {
     without.whales.clear();
     let share = differing_share(&snapshot(&mut r, &with), &snapshot(&mut r, &without));
     eprintln!("whales change {:.2} % of the pixels", share * 100.0);
-    assert!(share >= 0.001, "whales change only {:.3} % of the pixels", share * 100.0);
+    assert!(
+        share >= 0.001,
+        "whales change only {:.3} % of the pixels",
+        share * 100.0
+    );
 }
 
 #[test]
@@ -248,7 +296,11 @@ fn fish_are_drawn() {
     without.creatures.clear();
     let share = differing_share(&snapshot(&mut r, &with), &snapshot(&mut r, &without));
     eprintln!("fish change {:.2} % of the pixels", share * 100.0);
-    assert!(share >= 0.0005, "fish change only {:.3} % of the pixels", share * 100.0);
+    assert!(
+        share >= 0.0005,
+        "fish change only {:.3} % of the pixels",
+        share * 100.0
+    );
 }
 
 /// The pixels of `with` that differ from `without`, as RGB in 0..1.
@@ -256,7 +308,13 @@ fn differing_pixels(with: &image::RgbaImage, without: &image::RgbaImage) -> Vec<
     with.pixels()
         .zip(without.pixels())
         .filter(|(a, b)| a != b)
-        .map(|(a, _)| [a[0] as f64 / 255.0, a[1] as f64 / 255.0, a[2] as f64 / 255.0])
+        .map(|(a, _)| {
+            [
+                a[0] as f64 / 255.0,
+                a[1] as f64 / 255.0,
+                a[2] as f64 / 255.0,
+            ]
+        })
         .collect()
 }
 
@@ -272,7 +330,10 @@ fn night_fish_are_not_red() {
         let mut without = with.clone();
         without.creatures.clear();
         // Large enough that the near fish have bodies, not only edges blended with the water.
-        let fish = differing_pixels(&r.snapshot(&with, 960, 600).unwrap(), &r.snapshot(&without, 960, 600).unwrap());
+        let fish = differing_pixels(
+            &r.snapshot(&with, 960, 600).unwrap(),
+            &r.snapshot(&without, 960, 600).unwrap(),
+        );
         assert!(!fish.is_empty(), "fish are drawn at {h}:00");
         // The fish's bodies: the darkest tenth of the changed pixels.
         let mut body = fish.clone();
@@ -286,14 +347,26 @@ fn night_fish_are_not_red() {
             mean(2),
             red * 100.0
         );
-        assert!(mean(2) >= mean(0), "fish at {h}:00 are redder than blue: r {:.4} b {:.4}", mean(0), mean(2));
-        assert!(red < 0.01, "{:.1} % of the fish pixels at {h}:00 are redder than blue", red * 100.0);
+        assert!(
+            mean(2) >= mean(0),
+            "fish at {h}:00 are redder than blue: r {:.4} b {:.4}",
+            mean(0),
+            mean(2)
+        );
+        assert!(
+            red < 0.01,
+            "{:.1} % of the fish pixels at {h}:00 are redder than blue",
+            red * 100.0
+        );
     }
 }
 
 /// The luma below which `share` of the pixels lie.
 fn luma_percentile(image: &image::RgbaImage, share: f64) -> f64 {
-    let mut l: Vec<f64> = rgb(image).iter().map(|c| 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]).collect();
+    let mut l: Vec<f64> = rgb(image)
+        .iter()
+        .map(|c| 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2])
+        .collect();
     l.sort_by(|a, b| a.partial_cmp(b).unwrap());
     l[((l.len() - 1) as f64 * share) as usize]
 }
@@ -307,5 +380,8 @@ fn moonlight_is_no_spotlight() {
     let morning = luma_percentile(&snapshot(&mut r, &at_hour(7.0)), 0.999);
     let night = luma_percentile(&snapshot(&mut r, &at_hour(21.0)), 0.999);
     eprintln!("99.9th percentile luma: 21h {night:.3}, 7h {morning:.3}, 12h {noon:.3}");
-    assert!(night < 0.6 * noon, "moonlit peak {night:.3} vs noon peak {noon:.3}");
+    assert!(
+        night < 0.6 * noon,
+        "moonlit peak {night:.3} vs noon peak {noon:.3}"
+    );
 }

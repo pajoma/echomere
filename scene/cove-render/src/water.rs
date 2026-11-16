@@ -23,15 +23,30 @@ impl SceneBuffer {
 
     /// `aspect` is width / height of the scene target, `pixels_high` its height in pixels (for
     /// anti-aliasing). `sea_from_above` switches to the debug view of the sea from above.
-    pub fn pack(frame: &SceneFrame, aspect: f64, pixels_high: f64, sea_from_above: bool) -> Vec<[f32; 4]> {
+    pub fn pack(
+        frame: &SceneFrame,
+        aspect: f64,
+        pixels_high: f64,
+        sea_from_above: bool,
+    ) -> Vec<[f32; 4]> {
         let mut data = vec![[0.0f32; 4]; Self::COUNT];
         let creatures = &frame.creatures[..frame.creatures.len().min(Self::MAX_CREATURES)];
         let echoes = &frame.echoes[..frame.echoes.len().min(Self::MAX_ECHOES)];
 
         // Shader time runs over one day; f32 keeps enough precision for slow motion at that range.
         let shader_time = frame.time % 86_400.0;
-        data[0] = [aspect as f32, shader_time as f32, creatures.len() as f32, 0.0];
-        data[1] = [echoes.len() as f32, (1.0 / pixels_high) as f32, if sea_from_above { 1.0 } else { 0.0 }, 0.0];
+        data[0] = [
+            aspect as f32,
+            shader_time as f32,
+            creatures.len() as f32,
+            0.0,
+        ];
+        data[1] = [
+            echoes.len() as f32,
+            (1.0 / pixels_high) as f32,
+            if sea_from_above { 1.0 } else { 0.0 },
+            0.0,
+        ];
 
         for (i, c) in creatures.iter().enumerate() {
             let b = Self::CREATURE_START + i * 3;
@@ -129,25 +144,58 @@ impl Water {
                 ..Default::default()
             })
         };
-        let (displacement, derivatives, curvature) =
-            (array(&ocean.displacement), array(&ocean.derivatives), array(&ocean.curvature));
+        let (displacement, derivatives, curvature) = (
+            array(&ocean.displacement),
+            array(&ocean.derivatives),
+            array(&ocean.curvature),
+        );
         let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("water"),
             layout: &pipeline.get_bind_group_layout(0),
             entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: uniforms.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&displacement) },
-                wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&derivatives) },
-                wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(&curvature) },
-                wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::Sampler(&sampler) },
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: uniforms.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&displacement),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::TextureView(&derivatives),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::TextureView(&curvature),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: wgpu::BindingResource::Sampler(&sampler),
+                },
             ],
         });
-        Water { pipeline, uniforms, group }
+        Water {
+            pipeline,
+            uniforms,
+            group,
+        }
     }
 
     /// Uploads the frame's uniforms. Call before submitting the encoder that holds [`Water::draw`].
-    pub fn prepare(&self, queue: &wgpu::Queue, frame: &SceneFrame, size: (u32, u32), sea_from_above: bool) {
-        let data = SceneBuffer::pack(frame, size.0 as f64 / size.1 as f64, size.1 as f64, sea_from_above);
+    pub fn prepare(
+        &self,
+        queue: &wgpu::Queue,
+        frame: &SceneFrame,
+        size: (u32, u32),
+        sea_from_above: bool,
+    ) {
+        let data = SceneBuffer::pack(
+            frame,
+            size.0 as f64 / size.1 as f64,
+            size.1 as f64,
+            sea_from_above,
+        );
         queue.write_buffer(&self.uniforms, 0, bytemuck::cast_slice(&data));
     }
 
@@ -167,13 +215,17 @@ mod tests {
 
     #[test]
     fn scene_buffer_packs_like_swift() {
-        let mut frame = CoveScene::new(CoveSeed(4_711)).frame(1_794_000_000.0 + 400.0 * 86_400.0, &[], &[]);
+        let mut frame =
+            CoveScene::new(CoveSeed(4_711)).frame(1_794_000_000.0 + 400.0 * 86_400.0, &[], &[]);
         frame.sky = cove_scene::sky::state(12.0);
         let data = SceneBuffer::pack(&frame, 1.6, 200.0, true);
         assert_eq!(data.len(), 336);
         assert_eq!(data[0][1], (1_794_000_000.0f64 % 86_400.0) as f32);
         assert_eq!(data[1][1..3], [1.0 / 200.0, 1.0]);
-        assert_eq!(data[SceneBuffer::SKY_START + 1][3], frame.sky.ambient as f32);
+        assert_eq!(
+            data[SceneBuffer::SKY_START + 1][3],
+            frame.sky.ambient as f32
+        );
         assert_eq!(SceneBuffer::MAX_CREATURES, 104);
         assert_eq!(SceneBuffer::MAX_ECHOES, 5);
     }

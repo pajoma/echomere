@@ -32,7 +32,10 @@ fn visitor_order_does_not_change_the_frame() {
 
 #[test]
 fn different_coves_have_different_kelp_and_fish() {
-    assert_ne!(CoveScene::new(CoveSeed(1)).layout, CoveScene::new(CoveSeed(2)).layout);
+    assert_ne!(
+        CoveScene::new(CoveSeed(1)).layout,
+        CoveScene::new(CoveSeed(2)).layout
+    );
 }
 
 #[test]

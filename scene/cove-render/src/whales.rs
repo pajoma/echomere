@@ -32,7 +32,10 @@ pub fn assets_dir() -> PathBuf {
     if let Some(dir) = std::env::var_os("ECHOMERE_ASSETS") {
         return PathBuf::from(dir);
     }
-    if let Some(dir) = std::env::current_exe().ok().and_then(|exe| exe.parent().map(|p| p.join("assets"))) {
+    if let Some(dir) = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(|p| p.join("assets")))
+    {
         if dir.is_dir() {
             return dir;
         }
@@ -76,14 +79,22 @@ impl Animation {
         }
         let joints = u32_at(bytes, 4) as usize;
         let frame_count = u32_at(bytes, 8) as usize;
-        let rows = joints * frame_count * 3;
-        if joints == 0 || joints > MAX_JOINTS || frame_count == 0 || bytes.len() != 16 + rows * 16 {
+        if joints == 0 || joints > MAX_JOINTS || frame_count == 0 {
+            return Err("wrong animation size".into());
+        }
+        let expected = joints
+            .checked_mul(frame_count)
+            .and_then(|n| n.checked_mul(3 * 16))
+            .and_then(|n| n.checked_add(16));
+        if expected != Some(bytes.len()) {
             return Err("wrong animation size".into());
         }
         let frames: Vec<[f32; 4]> = bytes[16..]
             .chunks_exact(16)
             .map(|row| {
-                let f = |i: usize| f32::from_le_bytes(row[i * 4..i * 4 + 4].try_into().expect("four bytes"));
+                let f = |i: usize| {
+                    f32::from_le_bytes(row[i * 4..i * 4 + 4].try_into().expect("four bytes"))
+                };
                 [f(0), f(1), f(2), f(3)]
             })
             .collect();
@@ -100,7 +111,12 @@ impl Animation {
                 *v /= frame_count as f32;
             }
         }
-        Ok(Animation { joints, frame_count, frames, glide })
+        Ok(Animation {
+            joints,
+            frame_count,
+            frames,
+            glide,
+        })
     }
 
     /// The joint matrices (three rows per joint) for a moment in the swim loop. `phase` is where in the
@@ -114,7 +130,11 @@ impl Animation {
         let rows = self.joints * 3;
         (0..rows)
             .map(|row| {
-                let (a, b, g) = (self.frames[first * rows + row], self.frames[second * rows + row], self.glide[row]);
+                let (a, b, g) = (
+                    self.frames[first * rows + row],
+                    self.frames[second * rows + row],
+                    self.glide[row],
+                );
                 std::array::from_fn(|i| g[i] + (a[i] + (b[i] - a[i]) * blend - g[i]) * strength)
             })
             .collect()
@@ -133,13 +153,23 @@ pub struct WhaleModel {
 
 impl WhaleModel {
     /// Loads `<name>.mesh`, `<name>.animation` and `<name>.jpg` of `species` from `dir`.
-    pub fn load(dir: &Path, species: WhaleSpecies, device: &wgpu::Device, queue: &wgpu::Queue) -> Result<Self, RenderError> {
+    pub fn load(
+        dir: &Path,
+        species: WhaleSpecies,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) -> Result<Self, RenderError> {
         let name = file_name(species);
         let read = |extension: &str| {
             let path = dir.join(format!("{name}.{extension}"));
             std::fs::read(&path).map_err(|e| RenderError::Asset(format!("{}: {e}", path.display())))
         };
-        let bad = |what: &str, problem: String| RenderError::Asset(format!("{}: {problem}", dir.join(format!("{name}.{what}")).display()));
+        let bad = |what: &str, problem: String| {
+            RenderError::Asset(format!(
+                "{}: {problem}",
+                dir.join(format!("{name}.{what}")).display()
+            ))
+        };
 
         let mesh = read("mesh")?;
         if mesh.len() < 12 || &mesh[..4] != b"EWM2" {
@@ -152,7 +182,9 @@ impl WhaleModel {
             return Err(bad("mesh", "wrong size".into()));
         }
         let animation = Animation::parse(&read("animation")?).map_err(|e| bad("animation", e))?;
-        let skin = image::load_from_memory(&read("jpg")?).map_err(|e| bad("jpg", e.to_string()))?.to_rgba8();
+        let skin = image::load_from_memory(&read("jpg")?)
+            .map_err(|e| bad("jpg", e.to_string()))?
+            .to_rgba8();
 
         let buffer = |label, usage, contents: &[u8]| {
             let b = device.create_buffer(&wgpu::BufferDescriptor {
@@ -164,8 +196,16 @@ impl WhaleModel {
             queue.write_buffer(&b, 0, contents);
             b
         };
-        let vertices = buffer("whale vertices", wgpu::BufferUsages::VERTEX, &mesh[12..12 + vertex_bytes]);
-        let indices = buffer("whale indices", wgpu::BufferUsages::INDEX, &mesh[12 + vertex_bytes..]);
+        let vertices = buffer(
+            "whale vertices",
+            wgpu::BufferUsages::VERTEX,
+            &mesh[12..12 + vertex_bytes],
+        );
+        let indices = buffer(
+            "whale indices",
+            wgpu::BufferUsages::INDEX,
+            &mesh[12 + vertex_bytes..],
+        );
         Ok(WhaleModel {
             vertices,
             indices,
@@ -183,12 +223,20 @@ impl WhaleModel {
 
 /// Uploads the skin with mipmaps (as the Swift renderer's texture loader made them). The texture is not
 /// sRGB: the shader decodes the skin with `to_linear`.
-fn upload_skin(device: &wgpu::Device, queue: &wgpu::Queue, skin: &image::RgbaImage) -> wgpu::TextureView {
+fn upload_skin(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    skin: &image::RgbaImage,
+) -> wgpu::TextureView {
     let (width, height) = skin.dimensions();
     let levels = 32 - width.max(height).leading_zeros();
     let texture = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("whale skin"),
-        size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+        size: wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
         mip_level_count: levels,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
@@ -200,7 +248,8 @@ fn upload_skin(device: &wgpu::Device, queue: &wgpu::Queue, skin: &image::RgbaIma
     for level in 0..levels {
         let (w, h) = ((width >> level).max(1), (height >> level).max(1));
         if level > 0 {
-            level_image = image::imageops::resize(&level_image, w, h, image::imageops::FilterType::Triangle);
+            level_image =
+                image::imageops::resize(&level_image, w, h, image::imageops::FilterType::Triangle);
         }
         queue.write_texture(
             wgpu::TexelCopyTextureInfo {
@@ -210,8 +259,16 @@ fn upload_skin(device: &wgpu::Device, queue: &wgpu::Queue, skin: &image::RgbaIma
                 aspect: wgpu::TextureAspect::All,
             },
             level_image.as_raw(),
-            wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(4 * w), rows_per_image: Some(h) },
-            wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(4 * w),
+                rows_per_image: Some(h),
+            },
+            wgpu::Extent3d {
+                width: w,
+                height: h,
+                depth_or_array_layers: 1,
+            },
         );
     }
     texture.create_view(&wgpu::TextureViewDescriptor::default())
@@ -242,7 +299,12 @@ pub(crate) struct Whales {
 
 impl Whales {
     /// Loads both species' models from `dir`.
-    pub fn new(device: &wgpu::Device, queue: &wgpu::Queue, ocean: &Ocean, dir: &Path) -> Result<Self, RenderError> {
+    pub fn new(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        ocean: &Ocean,
+        dir: &Path,
+    ) -> Result<Self, RenderError> {
         let models = WhaleSpecies::ALL
             .iter()
             .map(|&species| WhaleModel::load(dir, species, device, queue))
@@ -297,7 +359,11 @@ impl Whales {
             bind_group_layouts: &[Some(&layout)],
             immediate_size: 0,
         });
-        let attribute = |format, offset, shader_location| wgpu::VertexAttribute { format, offset, shader_location };
+        let attribute = |format, offset, shader_location| wgpu::VertexAttribute {
+            format,
+            offset,
+            shader_location,
+        };
         let attributes = [
             attribute(wgpu::VertexFormat::Float32x3, 0, 0),
             attribute(wgpu::VertexFormat::Float32x3, 12, 1),
@@ -319,7 +385,10 @@ impl Whales {
                 })],
             },
             // Seen from both sides, as in the Swift renderer: some models are not closed.
-            primitive: wgpu::PrimitiveState { cull_mode: None, ..Default::default() },
+            primitive: wgpu::PrimitiveState {
+                cull_mode: None,
+                ..Default::default()
+            },
             depth_stencil: Some(wgpu::DepthStencilState {
                 format: DEPTH_FORMAT,
                 depth_write_enabled: Some(true),
@@ -402,9 +471,18 @@ impl Whales {
                                 size: wgpu::BufferSize::new(WHALE_BYTES),
                             }),
                         },
-                        wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&model.skin) },
-                        wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&self.curvature) },
-                        wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::Sampler(&self.sampler) },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: wgpu::BindingResource::TextureView(&model.skin),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: wgpu::BindingResource::TextureView(&self.curvature),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 3,
+                            resource: wgpu::BindingResource::Sampler(&self.sampler),
+                        },
                     ],
                 })
             })
@@ -414,7 +492,14 @@ impl Whales {
     /// Uploads every visible whale's uniforms. Call before submitting the encoder that holds
     /// [`Whales::draw`]. `size` is the scene target's size in pixels; nothing is drawn when `visible` is
     /// false.
-    pub fn prepare(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, frame: &SceneFrame, size: (u32, u32), visible: bool) {
+    pub fn prepare(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        frame: &SceneFrame,
+        size: (u32, u32),
+        visible: bool,
+    ) {
         self.draws.clear();
         if !visible {
             return;
@@ -427,7 +512,10 @@ impl Whales {
         let v = |a: [f64; 3], w: f64| [a[0] as f32, a[1] as f32, a[2] as f32, w as f32];
         let mut data = vec![0u8; self.slot as usize * whales.len()];
         for (i, whale) in whales.iter().enumerate() {
-            let model = WhaleSpecies::ALL.iter().position(|&s| s == whale.species).expect("every species has a model");
+            let model = WhaleSpecies::ALL
+                .iter()
+                .position(|&s| s == whale.species)
+                .expect("every species has a model");
             let mut uniforms = vec![
                 v(whale.position, whale.length),
                 v(whale.forward, whale.roll),
@@ -437,11 +525,16 @@ impl Whales {
                 v(sky.light_colour, sky.ambient),
             ];
             // The model's own swim animation, at the point of the whale's tail beat.
-            uniforms.extend(self.models[model].pose(whale.tail_phase / std::f64::consts::TAU, whale.effort));
+            uniforms.extend(
+                self.models[model].pose(whale.tail_phase / std::f64::consts::TAU, whale.effort),
+            );
             let bytes: &[u8] = bytemuck::cast_slice(&uniforms);
             let start = i * self.slot as usize;
             data[start..start + bytes.len()].copy_from_slice(bytes);
-            self.draws.push(Draw { model, offset: start as u32 });
+            self.draws.push(Draw {
+                model,
+                offset: start as u32,
+            });
         }
         if !data.is_empty() {
             queue.write_buffer(&self.uniforms, 0, &data);
@@ -503,11 +596,24 @@ mod tests {
     }
 
     #[test]
+    fn absurd_animation_counts_are_refused_without_overflow() {
+        let mut header = b"EWA1".to_vec();
+        header.extend(u32::MAX.to_le_bytes());
+        header.extend(u32::MAX.to_le_bytes());
+        header.extend(1.0f32.to_le_bytes());
+        assert!(Animation::parse(&header).is_err());
+    }
+
+    #[test]
     fn prepared_models_are_valid() {
         for species in WhaleSpecies::ALL {
             let path = whales_dir().join(format!("{}.animation", file_name(species)));
             let animation = Animation::parse(&std::fs::read(&path).unwrap()).unwrap();
-            assert!(animation.joints > 0 && animation.frame_count > 0, "{}", path.display());
+            assert!(
+                animation.joints > 0 && animation.frame_count > 0,
+                "{}",
+                path.display()
+            );
         }
     }
 }

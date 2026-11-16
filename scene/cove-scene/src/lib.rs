@@ -1,3 +1,5 @@
+// `max(..).min(..)` is kept over `clamp` on purpose: it matches the Swift original and swallows NaN instead of returning it.
+#![allow(clippy::manual_clamp)]
 pub mod camera;
 pub mod kelp;
 pub mod layout;

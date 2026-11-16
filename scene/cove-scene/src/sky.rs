@@ -128,8 +128,7 @@ pub fn state(raw_hour: f64) -> SkyState {
         sun,
         &keys,
         &[[0.26; 3], [0.45; 3], [0.75; 3], [1.00; 3], [1.45; 3]],
-    )[0]
-        + moon_strength * 0.45;
+    )[0] + moon_strength * 0.45;
 
     SkyState {
         hour,
@@ -155,7 +154,10 @@ pub fn interpolate(x: f64, keys: &[f64], values: &[V3]) -> V3 {
     for i in 1..keys.len() {
         if x <= keys[i] {
             let t = (x - keys[i - 1]) / (keys[i] - keys[i - 1]);
-            return add(values[i - 1], scale(add(values[i], scale(values[i - 1], -1.0)), t));
+            return add(
+                values[i - 1],
+                scale(add(values[i], scale(values[i - 1], -1.0)), t),
+            );
         }
     }
     values[values.len() - 1]
