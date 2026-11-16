@@ -10,8 +10,8 @@ const WATER_COLOUR: vec3f = vec3f(0.16, 0.58, 0.90);
 const OPEN_WATER: f32 = 240.0;
 // Scales the linear light before the tone map. The design's starting value 0.6 washed the picture out
 // with the water model (mean luma 0.37 on the moonlit test frame, 0.54 at 07:00, 0.63 at noon); 0.2 keeps
-// it dark and calm.
-const EXPOSURE: f32 = 0.2;
+// it dark and calm; the owner chose 0.13 (2026-11-16) with the camera tilted 40 degrees up.
+const EXPOSURE: f32 = 0.13;
 
 // Hand-picked, display-encoded colours enter the shaders through this.
 fn to_linear(c: vec3f) -> vec3f { return pow(max(c, vec3f(0.0)), vec3f(2.2)); }
@@ -105,8 +105,8 @@ fn through_water(c: vec3f, origin: vec3f, ray: vec3f, distance: f32, s: Sky) -> 
 
 // The camera: a real perspective camera with a 70 degree vertical field of view, tilted 15 degrees up.
 const FOCAL: f32 = 0.714;
-const PITCH: f32 = 0.262;
-const HORIZON: f32 = 0.309;            // 0.5 - FOCAL * tan(PITCH)
+const PITCH: f32 = 0.69813;               // 40 degrees up
+const HORIZON: f32 = -0.0991;           // 0.5 - FOCAL * tan(PITCH): below the picture
 // sea::CASCADE_SIZES: long swell, wind sea, ripples.
 fn cascade_size(c: i32) -> f32 { return select(select(211.3, 39.7, c == 1), 7.43, c == 2); }
 

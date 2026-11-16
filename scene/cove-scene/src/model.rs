@@ -120,6 +120,6 @@ pub mod scene_rules {
     pub const CAMERA_DEPTH: f64 = 30.0;
     /// The camera is tilted up by this angle (radians) and has this focal length, in picture
     /// heights. Must match `PITCH` and `FOCAL` in the shader.
-    pub const CAMERA_PITCH: f64 = 0.262;
+    pub const CAMERA_PITCH: f64 = 0.69813; // 40 degrees up
     pub const CAMERA_FOCAL: f64 = 0.714;
 }
