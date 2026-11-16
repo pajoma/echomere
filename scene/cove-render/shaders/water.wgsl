@@ -189,7 +189,7 @@ fn light_shafts(s: Sky, ray: vec3f, pixel: vec2f, y: f32) -> vec3f {
         let depth = -point.y;
         if (depth < 0.3) { continue; }
         let focus = caustic_at(s.light, point.xz, depth, true);
-        light += ((focus - 1.0) * 1.8 + 0.10) * sunlight_at(depth, s) * exp(-SIGMA * t) * dt;
+        light += ((focus - 1.0) * 1.0 + 0.10) * sunlight_at(depth, s) * exp(-SIGMA * t) * dt;
     }
     // Only very few rays reach the deep in the lower third of the picture.
     let reach = mix(0.12, 1.0, smoothstep_f(0.08, HORIZON + 0.22, y));
@@ -220,7 +220,7 @@ fn marine_snow(p: vec2f, t: f32, s: Sky) -> vec3f {
     for (var l = 0; l < 2; l++) {
         let fl = f32(l);
         let sc = select(32.0, 60.0, l == 0);
-        let g = p * sc + vec2f(sin(t * 0.05 + fl) * 2.0, t * (0.012 + 0.01 * fl) * sc);
+        let g = p * sc + vec2f(sin(t * 0.03 + fl) * 2.0, t * (0.006 + 0.005 * fl) * sc);
         let cell = floor(g);
         let f = fract(g) - 0.5;
         let h = hash21(cell + fl * 17.0);

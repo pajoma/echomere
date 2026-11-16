@@ -93,7 +93,10 @@ fn in_scatter(origin: vec3f, ray: vec3f, distance: f32, s: Sky) -> vec3f {
     a = select(a, vec3(1e-4), abs(a) < vec3(1e-4));          // no division by ~0 for steep upward rays
     let integral = (1.0 - exp(-a * distance)) / a;
     let mu = max(dot(ray, sun_in_water(s.light)), 0.0);
-    let light = WATER_COLOUR * s.ambient * 1.22                                    // diffused light: never 0
+    // Under water the diffused light comes mostly from above: looking sideways sees far less of it than
+    // looking up, and looking down almost none.
+    let up = ray.y * 0.5 + 0.5;
+    let light = WATER_COLOUR * s.ambient * 1.22 * mix(0.02, 1.0, up * up * up * up)     // diffused light: never 0
               + WATER_COLOUR * to_linear(s.colour) * s.intensity * 0.3 * pow(mu, 4.0);  // glow towards sun/moon
     return SIGMA * exp(KD * origin.y) * integral * light;
 }

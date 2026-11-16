@@ -26,7 +26,8 @@ fn kelp_sways_with_swell() {
         quarter += 2.0 * std::f64::consts::PI;
     }
     assert!((quarter - std::f64::consts::FRAC_PI_2).abs() < 1e-6);
-    assert!(kelp::surge_period() > 8.0 && kelp::surge_period() < 10.0);
+    // A long, slow swell (owner, 2026-11-16: meditative); the Swift reference had 8 to 10 s.
+    assert!(kelp::surge_period() > 10.0 && kelp::surge_period() < 12.0);
     println!("surge period {:.1} s", kelp::surge_period());
 }
 

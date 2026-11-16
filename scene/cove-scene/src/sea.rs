@@ -4,20 +4,20 @@
 //! for every cove and every screen, and repeats seamlessly every `LOOP_PERIOD` seconds.
 
 /// Wind speed 10 m above the sea, in m/s.
-pub const WIND_SPEED: f64 = 11.0;
+pub const WIND_SPEED: f64 = 6.0;
 /// Direction the wind waves travel, in degrees from the x axis (90 is away from the camera).
 pub const WIND_DIRECTION: f64 = 118.0;
 /// Distance the wind has blown over open water, in metres.
 pub const FETCH: f64 = 90_000.0;
 pub const JONSWAP_GAMMA: f64 = 3.3;
 /// Significant height of the swell, in metres.
-pub const SWELL_HEIGHT: f64 = 2.4;
+pub const SWELL_HEIGHT: f64 = 1.0;
 pub const SWELL_DIRECTION: f64 = 94.0;
-pub const SWELL_WAVELENGTH: f64 = 120.0;
+pub const SWELL_WAVELENGTH: f64 = 160.0;
 /// How narrow the swell's directions are (cos^2s exponent): larger is more long-crested.
 pub const SWELL_SPREAD: f64 = 48.0;
 /// How much the crests are sharpened by horizontal displacement.
-pub const CHOPPINESS: f64 = 1.45;
+pub const CHOPPINESS: f64 = 1.0;
 /// Waves shorter than about this length (m) are damped.
 pub const SHORT_WAVE_CUT: f64 = 0.0012;
 /// Patch sizes of the simulation cascades, in metres: long swell, wind sea, ripples.

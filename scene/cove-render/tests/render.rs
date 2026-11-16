@@ -27,14 +27,16 @@ fn refuses_srgb_outputs() {
 }
 
 #[test]
-fn sea_has_rough_open_sea_waves() {
+// The owner wants the scene meditative (2026-11-16): a calm sea with a low, long swell, not the rough open
+// sea of the Swift reference (0.5 to 2 m).
+fn sea_is_calm() {
     let s = renderer().sea_statistics(123.0).unwrap();
     let total = s
         .iter()
         .map(|c| c.height_rms * c.height_rms)
         .sum::<f64>()
         .sqrt();
-    assert!(total > 0.5 && total < 2.0, "height RMS {total}");
+    assert!(total > 0.2 && total < 0.5, "height RMS {total}");
 }
 
 // The rendering and lighting checks, ported from `SceneChecks/main.swift` (the "Rendering" block) and the
@@ -383,5 +385,20 @@ fn moonlight_is_no_spotlight() {
     assert!(
         night < 0.6 * noon,
         "moonlit peak {night:.3} vs noon peak {noon:.3}"
+    );
+}
+
+// The owner (2026-11-16): "at the bottom it should be really dark". The lowest fifth of the picture looks
+// out sideways into the deep, the top fifth up towards the surface.
+#[test]
+fn bottom_is_really_dark() {
+    let mut r = renderer();
+    let pixels = rgb(&snapshot(&mut r, &at_hour(12.0)));
+    let rows = H as usize / 5;
+    let top = mean_luma(&pixels[..rows * W as usize]);
+    let bottom = mean_luma(&pixels[pixels.len() - rows * W as usize..]);
+    assert!(
+        bottom < 0.1 && bottom < 0.4 * top,
+        "bottom {bottom}, top {top}"
     );
 }
