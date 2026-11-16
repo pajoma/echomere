@@ -8,6 +8,10 @@ const KD: vec3f = vec3f(0.056, 0.0245, 0.0170);          // diffuse attenuation 
 const WATER_COLOUR: vec3f = vec3f(0.16, 0.58, 0.90);
 // Open water without a hit is drawn as if the ray met something this far away (m).
 const OPEN_WATER: f32 = 240.0;
+// The water's glow at sunrise and sunset, and how far it replaces the blue at full warmth. Real water
+// swallows red within metres; this is a deliberate red shift for the mood (owner, 2026-11-16).
+const WARM_WATER: vec3f = vec3f(0.95, 0.50, 0.24);
+const WARMTH: f32 = 0.8;
 // Scales the linear light before the tone map. The design's starting value 0.6 washed the picture out
 // with the water model (mean luma 0.37 on the moonlit test frame, 0.54 at 07:00, 0.63 at noon); 0.2 keeps
 // it dark and calm; the owner chose 0.13 (2026-11-16) with the camera tilted 40 degrees up.
@@ -47,6 +51,7 @@ struct Sky {
     zenith: vec3f,
     horizon: vec3f,
     night: f32,                    // 1 when the light is the moon's, 0 for the sun's
+    warmth: f32,                   // 0..1: how warm sunrise or sunset colours the water
 };
 
 fn sky_from(light: vec4f, colour: vec4f, zenith: vec4f, horizon: vec4f) -> Sky {
@@ -58,6 +63,7 @@ fn sky_from(light: vec4f, colour: vec4f, zenith: vec4f, horizon: vec4f) -> Sky {
     s.night = zenith.w;
     s.zenith = zenith.rgb;
     s.horizon = horizon.rgb;
+    s.warmth = horizon.w;
     return s;
 }
 
@@ -66,9 +72,25 @@ fn sun_in_water(light: vec3f) -> vec3f {
     return -refract(-light, vec3f(0.0, 1.0, 0.0), 1.0 / WATER_IOR);
 }
 
+// The colour of the light the water scatters: blue, warmed at sunrise and sunset.
+fn water_colour(s: Sky) -> vec3f {
+    return mix(WATER_COLOUR, WARM_WATER, s.warmth * WARMTH);
+}
+
+// Extinction and diffuse attenuation as the sky's warmth bends them: at sunrise and sunset the water
+// swallows red no faster than green, so the warm light survives the way down (a red shift for the mood,
+// not physics).
+fn sigma(s: Sky) -> vec3f {
+    return mix(SIGMA, vec3f(SIGMA.g), s.warmth * WARMTH);
+}
+
+fn kd(s: Sky) -> vec3f {
+    return mix(KD, vec3f(KD.g), s.warmth * WARMTH);
+}
+
 // The sun's or the moon's light at `depth` metres, per channel: red is lost first.
 fn sunlight_at(depth: f32, s: Sky) -> vec3f {
-    return to_linear(s.colour) * s.intensity * exp(-KD * depth / max(sun_in_water(s.light).y, 0.2));
+    return to_linear(s.colour) * s.intensity * exp(-kd(s) * depth / max(sun_in_water(s.light).y, 0.2));
 }
 
 // Adapted from abyssal-garden, Copyright (c) 2026 Maksymilian Dendura, MIT License.
@@ -77,9 +99,9 @@ fn sunlight_at(depth: f32, s: Sky) -> vec3f {
 // scaled by the sky's ambient.
 fn ambient_light(depth: f32, normal: vec3f, s: Sky) -> vec3f {
     let up = normal.y * 0.5 + 0.5;
-    let above = vec3f(0.22, 0.60, 0.80) * exp(-KD * depth * 1.2) * (0.24 + 0.76 * up * up) * 1.3
+    let above = vec3f(0.22, 0.60, 0.80) * exp(-kd(s) * depth * 1.2) * (0.24 + 0.76 * up * up) * 1.3
               * (0.55 + 0.45 * clamp(depth / 30.0, 0.0, 1.0)) + vec3f(0.003, 0.010, 0.016);
-    let side = WATER_COLOUR * exp(-KD * depth) * (1.0 - abs(normal.y)) * 0.7;
+    let side = water_colour(s) * exp(-kd(s) * depth) * (1.0 - abs(normal.y)) * 0.7;
     return (above + side) * s.ambient;
 }
 
@@ -89,21 +111,23 @@ fn ambient_light(depth: f32, normal: vec3f, s: Sky) -> vec3f {
 // The diffused light is scaled by the sky's ambient; a forward-scattering lobe towards the sun or the moon
 // by its intensity.
 fn in_scatter(origin: vec3f, ray: vec3f, distance: f32, s: Sky) -> vec3f {
-    var a = SIGMA - KD * ray.y;
+    let sg = sigma(s);
+    let k = kd(s);
+    var a = sg - k * ray.y;
     a = select(a, vec3(1e-4), abs(a) < vec3(1e-4));          // no division by ~0 for steep upward rays
     let integral = (1.0 - exp(-a * distance)) / a;
     let mu = max(dot(ray, sun_in_water(s.light)), 0.0);
     // Under water the diffused light comes mostly from above: looking sideways sees far less of it than
     // looking up, and looking down almost none.
     let up = ray.y * 0.5 + 0.5;
-    let light = WATER_COLOUR * s.ambient * 1.22 * mix(0.02, 1.0, up * up * up * up)     // diffused light: never 0
-              + WATER_COLOUR * to_linear(s.colour) * s.intensity * 0.3 * pow(mu, 4.0);  // glow towards sun/moon
-    return SIGMA * exp(KD * origin.y) * integral * light;
+    let light = s.ambient * 1.22 * mix(0.02, 1.0, up * up * up * up)              // diffused light: never 0
+              + to_linear(s.colour) * s.intensity * 0.3 * pow(mu, 4.0);           // glow towards sun/moon
+    return sg * exp(k * origin.y) * integral * water_colour(s) * light;
 }
 
 // What reaches the camera from something of colour `c` at `distance` metres along `ray`.
 fn through_water(c: vec3f, origin: vec3f, ray: vec3f, distance: f32, s: Sky) -> vec3f {
-    return c * exp(-SIGMA * distance) + in_scatter(origin, ray, distance, s);
+    return c * exp(-sigma(s) * distance) + in_scatter(origin, ray, distance, s);
 }
 
 // The camera: a real perspective camera with a 70 degree vertical field of view, tilted 15 degrees up.

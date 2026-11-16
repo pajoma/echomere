@@ -402,3 +402,21 @@ fn bottom_is_really_dark() {
         "bottom {bottom}, top {top}"
     );
 }
+
+fn mean_rgb(pixels: &[[f64; 3]]) -> [f64; 3] {
+    let n = pixels.len() as f64;
+    let sum = pixels
+        .iter()
+        .fold([0.0; 3], |s, c| [s[0] + c[0], s[1] + c[1], s[2] + c[2]]);
+    [sum[0] / n, sum[1] / n, sum[2] / n]
+}
+
+// The owner (2026-11-16): sunrise and sunset colour the water warm; the day stays blue.
+#[test]
+fn sunset_is_warm_noon_is_blue() {
+    let mut r = renderer();
+    let dusk = mean_rgb(&rgb(&snapshot(&mut r, &at_hour(17.0))));
+    let noon = mean_rgb(&rgb(&snapshot(&mut r, &at_hour(12.0))));
+    assert!(dusk[0] > dusk[2], "17:00 mean rgb {dusk:?}");
+    assert!(noon[0] < noon[2], "noon mean rgb {noon:?}");
+}

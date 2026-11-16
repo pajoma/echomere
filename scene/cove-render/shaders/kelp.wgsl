@@ -10,7 +10,7 @@ const SURGE: vec2f = vec2f(0.60, 0.80);                   // the way the swell p
 const KELP_ALBEDO_LIFT: f32 = 30.0;
 
 // u[0]: aspect, surge, drift, flutter
-// u[1]: 1 / pixels high, -, -, -
+// u[1]: 1 / pixels high, warmth, -, -
 // u[2]: light direction + intensity
 // u[3]: light colour + ambient
 @group(0) @binding(0) var<uniform> u: array<vec4f, 4>;
@@ -131,8 +131,8 @@ fn kelp_vertex(in: VIn) -> VOut {
 
 @fragment
 fn kelp_fragment(in: VOut) -> @location(0) vec4f {
-    // Only the light and its colour are used; the sky's zenith and horizon are not needed here.
-    let s = sky_from(u[2], u[3], vec4f(0.0), vec4f(0.0));
+    // Only the light, its colour and the warmth are used; the sky's zenith and horizon are not needed here.
+    let s = sky_from(u[2], u[3], vec4f(0.0), vec4f(0.0, 0.0, 0.0, u[1].y));
     let to_camera = CAMERA - in.world;
     let distance = length(to_camera);
     let view = to_camera / distance;

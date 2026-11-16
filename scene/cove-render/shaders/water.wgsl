@@ -206,9 +206,9 @@ fn light_shafts(s: Sky, ray: vec3f, pixel: vec2f) -> vec3f {
         let end = mix(SHAFT_END_MIN, SHAFT_END_MAX, value_noise(entry / 7.0));
         let fade = 1.0 - smoothstep_f(end - 8.0, end, depth);
         let casts = smoothstep_f(SHAFT_SPARSITY, SHAFT_SPARSITY + 0.2, value_noise(entry / 15.0 + 31.7));
-        light += ((focus - 1.0) * casts + 0.10) * fade * sunlight_at(depth, s) * exp(-SIGMA * t) * dt;
+        light += ((focus - 1.0) * casts + 0.10) * fade * sunlight_at(depth, s) * exp(-sigma(s) * t) * dt;
     }
-    return SHAFTS * mix(1.0, MOON_SHAFTS, s.night) * max(light, vec3f(0.0)) * SIGMA * WATER_COLOUR * min(phase, 6.0);
+    return SHAFTS * mix(1.0, MOON_SHAFTS, s.night) * max(light, vec3f(0.0)) * sigma(s) * water_colour(s) * min(phase, 6.0);
 }
 
 // An echo: the shimmer a whale left behind, and the ring of its call. Emitted light, `ECHO_DISTANCE` away.

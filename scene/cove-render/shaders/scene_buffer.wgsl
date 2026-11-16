@@ -8,7 +8,7 @@ const COUNT: i32 = 336;
 
 // d[0]: aspect, shader time (s within the day), creature count, -
 // d[1]: echo count, 1 / pixels high, sea from above (0 or 1), -
-// d[SKY..SKY+3]: light direction + intensity, light colour + ambient, zenith, horizon
+// d[SKY..SKY+3]: light direction + intensity, light colour + ambient, zenith + night, horizon + warmth
 // d[CREATURES + 3i ..]: x, y, depth, facing | phase, size, 1, - | colour, 1, -, -
 // d[ECHOES + 2i ..]: x, y, depth, intensity | call (or -1), size, -, -
 @group(0) @binding(0) var<uniform> d: array<vec4f, COUNT>;

@@ -19,6 +19,9 @@ pub struct SkyState {
     /// How bright the water itself is: 1 at the golden hour, more at noon, little at night.
     pub ambient: f64,
     pub is_night: bool,
+    /// How much sunrise or sunset colours the water warm, 0..1: full for an hour either side of 6 and 18
+    /// o'clock, gone three hours away (owner, 2026-11-16: long, warm dawns and dusks).
+    pub warmth: f64,
 }
 
 pub const SUN_PEAK_ELEVATION: f64 = 60.0;
@@ -38,9 +41,11 @@ pub fn state_at(at: f64) -> SkyState {
     state(hour(at))
 }
 
-/// Elevation of the sun in degrees: 0 at 6 and 18 o'clock, highest at noon.
+/// Elevation of the sun in degrees: 0 at 6 and 18 o'clock, highest at noon. It stays low longer than a
+/// plain sine would (sin^1.5), so sunrise and sunset last.
 pub fn sun_elevation(hour: f64) -> f64 {
-    SUN_PEAK_ELEVATION * (PI * (hour - 6.0) / 12.0).sin()
+    let s = (PI * (hour - 6.0) / 12.0).sin();
+    SUN_PEAK_ELEVATION * s.signum() * s.abs().powf(1.5)
 }
 
 pub fn moon_elevation(hour: f64) -> f64 {
@@ -79,7 +84,10 @@ pub fn state(raw_hour: f64) -> SkyState {
         azimuth.cos() * elevation.cos(),
     ];
 
-    let sun_strength = smooth(0.0, 10.0, sun) * (0.6 + 0.4 * smooth(10.0, 40.0, sun));
+    // The low sun glows right after sunrise and right before sunset, so its warm light reaches the cove
+    // through the surface (owner, 2026-11-16).
+    let sun_strength = (smooth(0.0, 10.0, sun) * (0.6 + 0.4 * smooth(10.0, 40.0, sun)))
+        .max(0.8 * smooth(0.0, 3.0, sun));
     let moon_strength = 0.5 * smooth(0.0, 10.0, moon);
     let moonlight = [0.70, 0.80, 1.00];
 
@@ -127,7 +135,7 @@ pub fn state(raw_hour: f64) -> SkyState {
     let ambient = interpolate(
         sun,
         &keys,
-        &[[0.26; 3], [0.45; 3], [0.75; 3], [1.00; 3], [1.45; 3]],
+        &[[0.26; 3], [0.60; 3], [0.95; 3], [1.10; 3], [1.45; 3]],
     )[0] + moon_strength * 0.45;
 
     SkyState {
@@ -139,6 +147,7 @@ pub fn state(raw_hour: f64) -> SkyState {
         horizon,
         ambient,
         is_night: night,
+        warmth: 1.0 - smooth(1.0, 3.0, (hour - 6.0).abs().min((hour - 18.0).abs())),
     }
 }
 

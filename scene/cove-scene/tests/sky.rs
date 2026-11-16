@@ -63,3 +63,23 @@ fn sky_hour_is_utc_and_wraps() {
     assert_eq!(sky::state_at(NOON), sky::state(sky::hour(NOON)));
     let _ = DAY;
 }
+
+// The owner (2026-11-16): dawn and dusk last longer and colour the water warm.
+#[test]
+fn dawn_and_dusk_are_warm_and_long() {
+    for h in [6.0, 18.0, 5.2, 6.8, 17.2, 18.8] {
+        assert!(sky::state(h).warmth > 0.99, "warmth at {h}:00");
+    }
+    for h in [0.0, 3.0, 9.0, 12.0, 15.0, 21.0] {
+        assert!(sky::state(h).warmth < 1e-9, "warmth at {h}:00");
+    }
+    assert!(sky::state(8.0).warmth > 0.3 && sky::state(16.0).warmth > 0.3);
+}
+
+#[test]
+fn sun_stays_low_longer() {
+    // A plain sine reaches 10 degrees by 6:40; the low sun lasts past 7:00.
+    assert!(sky::sun_elevation(7.0) < 10.0);
+    assert!((sky::sun_elevation(12.0) - sky::SUN_PEAK_ELEVATION).abs() < 1e-9);
+    assert!(sky::sun_elevation(3.0) < 0.0 && sky::sun_elevation(21.0) < 0.0);
+}

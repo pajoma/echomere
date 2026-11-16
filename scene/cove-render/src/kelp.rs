@@ -266,7 +266,7 @@ impl Kelp {
                 m.drift as f32,
                 m.flutter as f32,
             ],
-            [1.0 / size.1 as f32, 0.0, 0.0, 0.0],
+            [1.0 / size.1 as f32, sky.warmth as f32, 0.0, 0.0],
             v(sky.light_direction, sky.light_intensity),
             v(sky.light_colour, sky.ambient),
         ];

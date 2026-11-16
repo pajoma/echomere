@@ -8,7 +8,7 @@ const WHALE_HEADER: i32 = 6;
 // The skins are dark; decoded they read as black at 30 m. This lifts their albedo so the shape shows.
 const WHALE_ALBEDO_LIFT: f32 = 3.0;
 
-// w[0]: position, length · w[1]: forward, roll · w[2]: -, opacity, -, - · w[3]: aspect, 1 / pixels high
+// w[0]: position, length · w[1]: forward, roll · w[2]: warmth, opacity, -, - · w[3]: aspect, 1 / pixels high
 // w[4]: light direction, intensity · w[5]: light colour, ambient · from w[6]: three rows per joint
 @group(0) @binding(0) var<uniform> w: array<vec4f, 246>;  // WHALE_HEADER + 3 * MAX_JOINTS
 @group(0) @binding(1) var skin: texture_2d<f32>;
@@ -63,8 +63,8 @@ fn whale_vertex(in: WhaleIn) -> WhaleOut {
 
 @fragment
 fn whale_fragment(in: WhaleOut) -> @location(0) vec4f {
-    // Only the light and its colour are used; the sky's zenith and horizon are not needed here.
-    let s = sky_from(w[4], w[5], vec4f(0.0), vec4f(0.0));
+    // Only the light, its colour and the warmth are used; the sky's zenith and horizon are not needed here.
+    let s = sky_from(w[4], w[5], vec4f(0.0), vec4f(0.0, 0.0, 0.0, w[2].x));
     let to_camera = CAMERA - in.world;
     let distance = length(to_camera);
     let view = to_camera / distance;
