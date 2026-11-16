@@ -29,7 +29,7 @@ fn kelp_sways_with_swell() {
     assert!((quarter - std::f64::consts::FRAC_PI_2).abs() < 1e-6);
     // A long swell, slowed with the sea (owner, 2026-11-16: meditative, the waves "träger"); the Swift
     // reference had 8 to 10 s.
-    assert!(kelp::surge_period() > 25.0 && kelp::surge_period() < 30.0);
+    assert!(kelp::surge_period() > 40.0 && kelp::surge_period() < 48.0);
     println!("surge period {:.1} s", kelp::surge_period());
 }
 
@@ -47,5 +47,5 @@ fn kelp_sways_same_everywhere() {
 // The owner (2026-11-16): the waves must move much slower.
 #[test]
 fn sea_runs_slow() {
-    assert!((sea::SEA_PACE - 0.4).abs() < 1e-12);
+    assert!((sea::SEA_PACE - 0.25).abs() < 1e-12);
 }

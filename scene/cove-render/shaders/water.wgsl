@@ -24,6 +24,9 @@ const SHAFTS: f32 = 0.8;
 // Each shaft fades out somewhere between these depths, in metres, so they don't all end at one depth.
 const SHAFT_END_MIN: f32 = 22.0;
 const SHAFT_END_MAX: f32 = 45.0;
+// Only parts of the surface cast shafts: where the noise at a shaft's entry point is above this (0..1).
+// Higher means fewer shafts (owner, 2026-11-16: too many rays).
+const SHAFT_SPARSITY: f32 = 0.55;
 // The moon's shafts and its glint through the surface, relative to the sun's. The sky gives the moon half
 // the sun's intensity against a much dimmer water, which made it a spotlight; this keeps it soft.
 const MOON_SHAFTS: f32 = 0.3;
@@ -53,7 +56,7 @@ fn slope_at(q: vec2f, distance: f32) -> vec2f {
     var jxx = 0.0;
     var jzz = 0.0;
     for (var c = 0; c < 3; c++) {
-        let fade = select(select(1.0, exp(-distance / 200.0), c == 1), exp(-distance / 30.0), c == 2);
+        let fade = select(select(1.0, exp(-distance / 200.0), c == 1), exp(-distance / 12.0), c == 2);
         let s = sea_sample(derivatives, q, c, 0.0);
         slope += s.xy * fade;
         jxx += s.z * fade;
@@ -202,7 +205,8 @@ fn light_shafts(s: Sky, ray: vec3f, pixel: vec2f) -> vec3f {
         let entry = point.xz + sun.xz * (depth / sun.y);
         let end = mix(SHAFT_END_MIN, SHAFT_END_MAX, value_noise(entry / 7.0));
         let fade = 1.0 - smoothstep_f(end - 8.0, end, depth);
-        light += ((focus - 1.0) * 1.0 + 0.10) * fade * sunlight_at(depth, s) * exp(-SIGMA * t) * dt;
+        let casts = smoothstep_f(SHAFT_SPARSITY, SHAFT_SPARSITY + 0.2, value_noise(entry / 15.0 + 31.7));
+        light += ((focus - 1.0) * casts + 0.10) * fade * sunlight_at(depth, s) * exp(-SIGMA * t) * dt;
     }
     return SHAFTS * mix(1.0, MOON_SHAFTS, s.night) * max(light, vec3f(0.0)) * SIGMA * WATER_COLOUR * min(phase, 6.0);
 }

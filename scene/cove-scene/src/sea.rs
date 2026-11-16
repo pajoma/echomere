@@ -26,7 +26,7 @@ pub const CASCADE_SIZES: [f64; 3] = [211.3, 39.7, 7.43];
 pub const LOOP_PERIOD: f64 = 600.0;
 /// How fast the sea's time runs against real time. The owner wants the waves much slower and heavier
 /// than a real sea, for a meditative scene (2026-11-16).
-pub const SEA_PACE: f64 = 0.4;
+pub const SEA_PACE: f64 = 0.25;
 /// The seed for the random phases of the spectrum.
 pub const SEED: u32 = 1;
 
