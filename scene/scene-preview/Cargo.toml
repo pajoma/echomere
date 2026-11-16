@@ -11,4 +11,4 @@ cove-render = { path = "../cove-render" }
 cove-scene = { path = "../cove-scene" }
 image = { version = "0.25.10", default-features = false, features = ["png", "jpeg"] }
 pollster = "1.0.1"
-wgpu = { version = "30.0.2", default-features = false, features = ["std", "parking_lot", "metal", "vulkan", "wgsl"] }
+wgpu = { version = "30.0.2", default-features = false, features = ["std", "parking_lot", "metal", "vulkan", "gles", "wgsl"] }
