@@ -234,8 +234,26 @@ fn write_frames(options: &Options, directory: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Whether to open the window through X11 instead of Wayland. On ChromeOS (Linux runs behind its sommelier
+/// bridge) a Wayland window keeps showing the first picture of each swapchain buffer, so the scene seems to
+/// flip between two still images; through XWayland every frame arrives. Elsewhere winit's choice stands.
+fn prefers_x11(var: impl Fn(&str) -> Option<String>) -> bool {
+    var("SOMMELIER_VERSION").is_some() && var("DISPLAY").is_some_and(|d| !d.is_empty())
+}
+
+fn event_loop() -> Result<EventLoop<()>, winit::error::EventLoopError> {
+    let mut builder = EventLoop::builder();
+    #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+    if prefers_x11(|name| std::env::var(name).ok()) {
+        use winit::platform::x11::EventLoopBuilderExtX11;
+        println!("ChromeOS: drawing through X11 (its Wayland bridge shows stale frames)");
+        builder.with_x11();
+    }
+    builder.build()
+}
+
 fn run_window(options: Options) -> Result<(), String> {
-    let event_loop = EventLoop::new().map_err(|e| format!("No window system: {e}"))?;
+    let event_loop = event_loop().map_err(|e| format!("No window system: {e}"))?;
     // A check without hands: SCENE_PREVIEW_SELF_TEST=1 resizes the window after 6 s and quits after 12 s.
     let self_test =
         std::env::var_os("SCENE_PREVIEW_SELF_TEST").map(|_| SelfTest { resized: false });
@@ -670,5 +688,43 @@ impl Stats {
             self.gpu_ms = 0.0;
             self.cpu_ms = 0.0;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::prefers_x11;
+
+    fn env<'a>(vars: &'a [(&'a str, &'a str)]) -> impl Fn(&str) -> Option<String> + 'a {
+        move |name| {
+            vars.iter()
+                .find(|(k, _)| *k == name)
+                .map(|(_, v)| v.to_string())
+        }
+    }
+
+    #[test]
+    fn chromeos_linux_with_x_display_uses_x11() {
+        assert!(prefers_x11(env(&[
+            ("SOMMELIER_VERSION", "1"),
+            ("DISPLAY", ":0"),
+            ("WAYLAND_DISPLAY", "wayland-0")
+        ])));
+    }
+
+    #[test]
+    fn chromeos_linux_without_x_display_stays_on_wayland() {
+        assert!(!prefers_x11(env(&[
+            ("SOMMELIER_VERSION", "1"),
+            ("WAYLAND_DISPLAY", "wayland-0")
+        ])));
+    }
+
+    #[test]
+    fn other_linux_desktops_keep_winits_choice() {
+        assert!(!prefers_x11(env(&[
+            ("DISPLAY", ":0"),
+            ("WAYLAND_DISPLAY", "wayland-0")
+        ])));
     }
 }
