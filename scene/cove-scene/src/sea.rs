@@ -22,14 +22,17 @@ pub const CHOPPINESS: f64 = 1.0;
 pub const SHORT_WAVE_CUT: f64 = 0.0012;
 /// Patch sizes of the simulation cascades, in metres: long swell, wind sea, ripples.
 pub const CASCADE_SIZES: [f64; 3] = [211.3, 39.7, 7.43];
-/// The sea repeats after this many seconds.
+/// The sea repeats after this many seconds of sea time (`LOOP_PERIOD / SEA_PACE` seconds of real time).
 pub const LOOP_PERIOD: f64 = 600.0;
+/// How fast the sea's time runs against real time. The owner wants the waves much slower and heavier
+/// than a real sea, for a meditative scene (2026-11-16).
+pub const SEA_PACE: f64 = 0.4;
 /// The seed for the random phases of the spectrum.
 pub const SEED: u32 = 1;
 
-/// The time within the loop, in seconds, computed in double precision.
+/// The sea time within the loop, in seconds, computed in double precision.
 pub fn time(at: f64) -> f64 {
-    let t = at % LOOP_PERIOD;
+    let t = (at * SEA_PACE) % LOOP_PERIOD;
     if t < 0.0 {
         t + LOOP_PERIOD
     } else {

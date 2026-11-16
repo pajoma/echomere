@@ -1,5 +1,5 @@
 // The water pass: one full-screen triangle that draws the open water, the underside of the surface,
-// echoes, marine snow and the light shafts, in linear light into the scene target. Port of `scene_fragment`
+// echoes and the light shafts, in linear light into the scene target. Port of `scene_fragment`
 // and its helpers in `SceneShaders.swift`, with the lighting design's water model (common.wgsl). There is
 // no `finish()` here: the composite pass does it. It is compiled after common.wgsl, scene_buffer.wgsl (the
 // uniforms and the full-screen triangle) and caustics.wgsl.
@@ -16,14 +16,14 @@ const MAX_WAVE: f32 = 3.0;             // no wave rises or dips further than thi
 
 // Distances of the 2D elements (lighting design), in metres.
 const ECHO_DISTANCE: f32 = 20.0;
-const SNOW_NEAR: f32 = 2.0;             // layer 1: the coarser, brighter, faster flakes
-const SNOW_FAR: f32 = 6.0;              // layer 0: the fine, dim, slow flakes
-// The hand-picked echo and snow colours are display values; decoded they are far too faint to be seen
-// against the water. These lift them to a faint glow (echoes) and specks (snow).
+// The hand-picked echo colours are display values; decoded they are far too faint to be seen against the
+// water. This lifts them to a faint glow.
 const ECHO_LIFT: f32 = 24.0;
-const SNOW_LIFT: f32 = 80.0;
-// Overall strength of the light shafts.
-const SHAFTS: f32 = 1.0;
+// Overall strength of the light shafts (owner, 2026-11-16: softer).
+const SHAFTS: f32 = 0.8;
+// Each shaft fades out somewhere between these depths, in metres, so they don't all end at one depth.
+const SHAFT_END_MIN: f32 = 22.0;
+const SHAFT_END_MAX: f32 = 45.0;
 // The moon's shafts and its glint through the surface, relative to the sun's. The sky gives the moon half
 // the sun's intensity against a much dimmer water, which made it a spotlight; this keeps it soft.
 const MOON_SHAFTS: f32 = 0.3;
@@ -166,13 +166,22 @@ fn sea_from_above(s: Sky, ray: vec3f) -> vec3f {
     return mix(horizon, c, exp(-t / 900.0));
 }
 
+// Smooth value noise in 0..1, one random value per unit cell, blended smoothly between cells.
+fn value_noise(q: vec2f) -> f32 {
+    let i = floor(q);
+    let f = fract(q);
+    let u = f * f * (3.0 - 2.0 * f);
+    return mix(mix(hash21(i), hash21(i + vec2f(1.0, 0.0)), u.x),
+               mix(hash21(i + vec2f(0.0, 1.0)), hash21(i + vec2f(1.0, 1.0)), u.x), u.y);
+}
+
 // Light shafts: sunlight scattered towards the camera along its line of sight. At every step the light is
 // as bright as the long waves above have focused it, so the shafts sway and flicker with the waves; a shaft
 // is a line through the water along the sunlight, so collecting along the line of sight draws it as a
 // streak. Seawater scatters mostly forwards, so the shafts are strongest when looking towards the sun. The
 // light at each step is the water model's sunlight at that depth, scattered by the water and dimmed on its
 // way to the camera.
-fn light_shafts(s: Sky, ray: vec3f, pixel: vec2f, y: f32) -> vec3f {
+fn light_shafts(s: Sky, ray: vec3f, pixel: vec2f) -> vec3f {
     let sun = sun_in_water(s.light);
     let g = 0.55;
     let mu = dot(ray, sun);
@@ -189,11 +198,13 @@ fn light_shafts(s: Sky, ray: vec3f, pixel: vec2f, y: f32) -> vec3f {
         let depth = -point.y;
         if (depth < 0.3) { continue; }
         let focus = caustic_at(s.light, point.xz, depth, true);
-        light += ((focus - 1.0) * 1.0 + 0.10) * sunlight_at(depth, s) * exp(-SIGMA * t) * dt;
+        // Where on the surface this shaft enters; each shaft fades out at its own depth.
+        let entry = point.xz + sun.xz * (depth / sun.y);
+        let end = mix(SHAFT_END_MIN, SHAFT_END_MAX, value_noise(entry / 7.0));
+        let fade = 1.0 - smoothstep_f(end - 8.0, end, depth);
+        light += ((focus - 1.0) * 1.0 + 0.10) * fade * sunlight_at(depth, s) * exp(-SIGMA * t) * dt;
     }
-    // Only very few rays reach the deep in the lower third of the picture.
-    let reach = mix(0.12, 1.0, smoothstep_f(0.08, HORIZON + 0.22, y));
-    return SHAFTS * mix(1.0, MOON_SHAFTS, s.night) * max(light, vec3f(0.0)) * SIGMA * WATER_COLOUR * min(phase, 6.0) * reach;
+    return SHAFTS * mix(1.0, MOON_SHAFTS, s.night) * max(light, vec3f(0.0)) * SIGMA * WATER_COLOUR * min(phase, 6.0);
 }
 
 // An echo: the shimmer a whale left behind, and the ring of its call. Emitted light, `ECHO_DISTANCE` away.
@@ -213,25 +224,6 @@ fn draw_echo(p: vec2f, a: vec4f, b: vec4f, t: f32, i: i32) -> vec3f {
     return ECHO_LIFT * c * exp(-SIGMA * ECHO_DISTANCE);
 }
 
-// Marine snow, drifting down, in two layers: the fine, dim, slow layer 0 `SNOW_FAR` away and the coarser
-// layer 1 `SNOW_NEAR` away. Emitted light.
-fn marine_snow(p: vec2f, t: f32, s: Sky) -> vec3f {
-    var col = vec3f(0.0);
-    for (var l = 0; l < 2; l++) {
-        let fl = f32(l);
-        let sc = select(32.0, 60.0, l == 0);
-        let g = p * sc + vec2f(sin(t * 0.03 + fl) * 2.0, t * (0.006 + 0.005 * fl) * sc);
-        let cell = floor(g);
-        let f = fract(g) - 0.5;
-        let h = hash21(cell + fl * 17.0);
-        let off = vec2f(hash21(cell + 3.1), hash21(cell + 7.7)) - 0.5;
-        let m = smoothstep_f(0.07 + 0.04 * fl, 0.0, length(f - off * 0.6)) * step(0.86, h);
-        col += SNOW_LIFT * to_linear(vec3f(0.05, 0.07, 0.07)) * m * (0.5 + 0.5 * fl) * (0.3 + 0.7 * min(s.ambient, 1.0))
-             * exp(-SIGMA * select(SNOW_NEAR, SNOW_FAR, l == 0));
-    }
-    return col;
-}
-
 @fragment
 fn water_fragment(in: VOut) -> @location(0) vec4f {
     let aspect = d[0].x;
@@ -248,7 +240,6 @@ fn water_fragment(in: VOut) -> @location(0) vec4f {
     for (var i = 0; i < echo_count; i++) {
         col += draw_echo(p, d[ECHOES + i * 2], d[ECHOES + i * 2 + 1], t, i);
     }
-    col += marine_snow(p, t, s);
-    col += light_shafts(s, ray, in.position.xy, in.uv.y);
+    col += light_shafts(s, ray, in.position.xy);
     return vec4f(col, 1.0);
 }

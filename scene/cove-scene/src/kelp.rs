@@ -36,11 +36,12 @@ pub struct KelpMotion {
 pub const DRIFT_PERIOD: f64 = 60.0;
 pub const FLUTTER_PERIOD: f64 = 1.6;
 
-/// The period of the swell over the cove's seabed, in seconds: ω² = g·k·tanh(k·h).
+/// The period of the swell over the cove's seabed, in real seconds: ω² = g·k·tanh(k·h), slowed with the
+/// sea (`sea::SEA_PACE`) so the kelp keeps time with the waves above it.
 pub fn surge_period() -> f64 {
     let k = 2.0 * PI / sea::SWELL_WAVELENGTH;
     let omega = (9.81 * k * (k * scene_rules::CAMERA_DEPTH).tanh()).sqrt();
-    2.0 * PI / omega
+    2.0 * PI / omega / sea::SEA_PACE
 }
 
 pub fn motion(at: f64) -> KelpMotion {
