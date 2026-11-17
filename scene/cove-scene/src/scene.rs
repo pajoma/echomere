@@ -4,7 +4,7 @@
 //! all show the same picture without anything being streamed (ADR 0005).
 
 use crate::camera;
-use crate::kelp::{self, cycle, wrap_angle, KelpFrond, KelpMotion};
+use crate::kelp::{self, cycle, wrap_angle, KelpBlade, KelpMotion};
 use crate::layout::{CoveLayout, FishSchool};
 use crate::model::{scene_rules, CoveSeed, Echo, Visitor, WhaleLook, WhaleSpecies};
 use crate::random::{combine, stable_hash, SplitMix64};
@@ -69,7 +69,7 @@ pub struct SceneFrame {
     pub whales: Vec<WhalePose>,
     /// The small fish of the ambient life, ordered from far to near.
     pub creatures: Vec<CreaturePose>,
-    pub kelp: Vec<KelpFrond>,
+    pub kelp: Vec<KelpBlade>,
     pub kelp_motion: KelpMotion,
     pub echoes: Vec<EchoPose>,
     /// The time within the sea's loop, in seconds.

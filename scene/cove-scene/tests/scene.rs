@@ -1,24 +1,37 @@
 mod common;
 use common::*;
+use cove_scene::camera;
+use cove_scene::layout::CoveLayout;
 use cove_scene::model::CoveSeed;
 use cove_scene::scene::CoveScene;
 use cove_scene::sky;
 
 #[test]
-fn kelp_grows_where_giant_kelp_grows() {
+fn kelp_frames_the_picture() {
     let kelp = munich_bay().layout.kelp;
-    assert!(
-        !kelp.is_empty()
-            && kelp.iter().all(|k| k.base_depth >= 15.0
-                && k.base_depth <= 30.0
-                && k.length > k.base_depth
-                && k.length < 46.0)
-    );
+    for side in [-1.0, 1.0] {
+        let n = kelp.iter().filter(|b| b.side == side).count();
+        assert!((3..=6).contains(&n), "{n} blades on side {side}");
+    }
+    for b in &kelp {
+        let (x, y, _) = camera::project(b.root, 1.6).expect("root in front of the camera");
+        assert!(y < 0.0, "root below the picture, at y {y}");
+        assert!(
+            if b.side < 0.0 { x < 0.2 } else { x > 0.8 },
+            "root at picture x {x}"
+        );
+        let ahead = camera::ahead(b.root);
+        assert!((2.0..=8.0).contains(&ahead), "root {ahead} m ahead");
+        assert!((8.0..=20.0).contains(&b.length));
+    }
 }
 
 #[test]
-fn kelp_is_only_hinted_at() {
-    assert!(munich_bay().layout.kelp.iter().all(|k| k.base_z > 50.0));
+fn fish_ignore_the_kelp() {
+    // Kelp and fish come from separate streams of the cove seed.
+    let a = CoveLayout::new(CoveSeed(7));
+    assert_eq!(a.schools, CoveLayout::schools_for(CoveSeed(7)));
+    assert_eq!(a.kelp, CoveLayout::blades_for(CoveSeed(7)));
 }
 
 #[test]

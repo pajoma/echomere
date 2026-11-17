@@ -105,7 +105,7 @@ impl Renderer {
         }
         let ocean = Ocean::new(&device, &queue);
         let water = Water::new(&device, &ocean);
-        let kelp = Kelp::new(&device, &queue, &ocean);
+        let kelp = Kelp::new(&device, &queue);
         let whales = Whales::new(&device, &queue, &ocean, &whales::whales_dir())?;
         let fish = Fish::new(&device, &water.uniforms);
         let composite = Composite::new(&device);

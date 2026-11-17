@@ -4,37 +4,43 @@ use crate::model::scene_rules;
 use crate::sea;
 use std::f64::consts::PI;
 
-/// One stalk (stipe) of a giant kelp plant, in metres. x is to the right of the camera, z is ahead.
+/// The kelp is a frame of long ribbon blades at the picture's left and right edges, moving like the
+/// blades of abyssal-garden (`W_LEAF`). How fast the blades' own motion runs against real time (owner,
+/// 2026-11-16: meditative).
+pub const KELP_PACE: f64 = 0.4;
+
+/// One kelp blade, rooted below the picture near one of its side edges. Distances in metres: x is to the
+/// right of the camera, y up with the surface at 0, z ahead.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct KelpFrond {
-    pub base_x: f64,
-    pub base_z: f64,
-    /// How far below the surface the stalk is rooted.
-    pub base_depth: f64,
-    /// Length of the stalk: its depth plus the part that trails along the surface.
+pub struct KelpBlade {
+    pub root: [f64; 3],
     pub length: f64,
-    /// Where this stalk is in its sway, relative to the swell (radians).
+    /// The picture-x ratio (sideways offset over distance along the view axis, at 16:10) the blade's line
+    /// heads for as it rises, so the whole blade stays near the edge where it is rooted.
+    pub lean: f64,
+    /// How far the blade leans away from (+) or towards (-) the camera, -0.2..0.2.
+    pub forward: f64,
+    /// Full width at the widest point.
+    pub width: f64,
+    /// How strongly the blade curls, 0..1 (`W_LEAF`'s per-blade curvature).
+    pub curvature: f64,
+    /// `W_LEAF`'s per-blade seeds s1 and s2, each 0..1.
+    pub seed: [f64; 2],
+    /// -1 at the left edge, +1 at the right.
+    pub side: f64,
+    /// Offsets this blade's swell push, in radians.
     pub sway_phase: f64,
-    /// How the stalks of one plant wind around each other (radians).
-    pub twist_phase: f64,
-    /// Varies the blades from stalk to stalk.
-    pub blade_seed: f64,
-    pub blade_scale: f64,
 }
 
-/// Where the kelp is in its movement at one moment, as angles 0..2π.
+/// Where the kelp is in its movement at one moment.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct KelpMotion {
-    /// The back-and-forth surge of the swell.
+    /// The back-and-forth surge of the swell, as an angle 0..2π.
     pub surge: f64,
-    /// A slow sideways drift.
-    pub drift: f64,
-    /// The flutter of the blades.
-    pub flutter: f64,
+    /// The kelp clock in seconds: real time within the day, slowed by `KELP_PACE`. It repeats daily, like
+    /// the water's shader time.
+    pub time: f64,
 }
-
-pub const DRIFT_PERIOD: f64 = 60.0;
-pub const FLUTTER_PERIOD: f64 = 1.6;
 
 /// The period of the swell over the cove's seabed, in real seconds: ω² = g·k·tanh(k·h), slowed with the
 /// sea (`sea::SEA_PACE`) so the kelp keeps time with the waves above it.
@@ -47,8 +53,7 @@ pub fn surge_period() -> f64 {
 pub fn motion(at: f64) -> KelpMotion {
     KelpMotion {
         surge: cycle(at, surge_period()),
-        drift: cycle(at, DRIFT_PERIOD),
-        flutter: cycle(at, FLUTTER_PERIOD),
+        time: at.rem_euclid(86_400.0) * KELP_PACE,
     }
 }
 

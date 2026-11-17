@@ -1,9 +1,14 @@
 //! Everything about a cove that is generated once from its seed: kelp and ambient life.
-//! Port of `CoveLayout.swift`. The order of random draws matches the Swift code exactly.
+//! Port of `CoveLayout.swift`; the kelp is Echomere's own (a frame of blades at the picture's edges).
 
-use crate::kelp::KelpFrond;
+use crate::kelp::KelpBlade;
 use crate::model::{scene_rules, CoveSeed};
 use crate::random::SplitMix64;
+
+/// Mixed into the cove seed for the kelp's own random stream ("kelpkelp").
+const KELP_STREAM: u64 = 0x6B65_6C70_6B65_6C70;
+/// The picture shape the kelp is placed for; the kelp shader turns the blades for other shapes.
+const REFERENCE_ASPECT: f64 = 1.6;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct FishMember {
@@ -32,47 +37,66 @@ pub struct FishSchool {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct CoveLayout {
-    pub kelp: Vec<KelpFrond>,
+    pub kelp: Vec<KelpBlade>,
     pub schools: Vec<FishSchool>,
 }
 
 impl CoveLayout {
     pub fn new(seed: CoveSeed) -> Self {
-        let mut random = SplitMix64::new(seed.0);
+        Self {
+            kelp: Self::blades_for(seed),
+            schools: Self::schools_for(seed),
+        }
+    }
 
-        // Giant kelp, only hinted at in the background, rooted 25 to 30 m down on ground that rises
-        // gently in the distance.
+    /// The kelp frame: 3 to 6 long blades on each side, rooted below the picture 2 to 8 m ahead of the
+    /// camera, 4 to 14 % in from the edges of the 16:10 reference picture, heading for 8 to 16 % in. Drawn from their own stream of the cove
+    /// seed, so the fish don't depend on them.
+    pub fn blades_for(seed: CoveSeed) -> Vec<KelpBlade> {
+        let mut random = SplitMix64::new(seed.0 ^ KELP_STREAM);
+        let (cp, sp) = (
+            scene_rules::CAMERA_PITCH.cos(),
+            scene_rules::CAMERA_PITCH.sin(),
+        );
+        let focal = scene_rules::CAMERA_FOCAL;
         let mut kelp = Vec::new();
-        let plants = random.int(5, 7);
-        for plant in 0..plants {
-            let z = 55.0 + 45.0 * (plant as f64 + random.unit()) / plants as f64;
-            let x = random.range(-0.95, 0.95) * z;
-            let depth = scene_rules::CAMERA_DEPTH - 0.1 * (z - 55.0);
-            let plant_phase = random.angle();
-            let fronds = random.int(2, 4);
-            for _ in 0..fronds {
-                let base_x = x + random.range(-0.12, 0.12);
-                let base_z = z + random.range(-0.12, 0.12);
-                let length = depth + random.range(2.0, 7.0);
-                let sway_phase = plant_phase + random.range(-0.25, 0.25);
-                let twist_phase = random.angle();
-                let blade_seed = random.range(0.0, 100.0);
-                let blade_scale = random.range(0.85, 1.2);
-                kelp.push(KelpFrond {
-                    base_x,
-                    base_z,
-                    base_depth: depth,
-                    length,
-                    sway_phase,
-                    twist_phase,
-                    blade_seed,
-                    blade_scale,
+        for side in [-1.0, 1.0] {
+            let blades = random.int(3, 6);
+            for _ in 0..blades {
+                // Where the root appears (picture x and y, y below the bottom edge) and how far ahead it is.
+                let px = 0.5 + side * (0.5 - random.range(0.04, 0.14));
+                let py = random.range(-0.6, -0.2);
+                let ahead = random.range(2.0, 8.0);
+                // Back from the picture into the water (the inverse of `camera::project` at 16:10).
+                let dx = (px - 0.5) * ahead * REFERENCE_ASPECT / focal;
+                let up = (py - 0.5) * ahead / focal;
+                let dy = up * cp + ahead * sp;
+                let dz = -up * sp + ahead * cp;
+                // The picture x the blade's line heads for, a little further in than its root: the blade
+                // curls outwards as it rises, back towards the edge.
+                let line_x = 0.5 + side * (0.5 - random.range(0.08, 0.16));
+                let lean = (line_x - 0.5) * REFERENCE_ASPECT / focal;
+                kelp.push(KelpBlade {
+                    root: [dx, dy - scene_rules::CAMERA_DEPTH, dz],
+                    lean,
+                    length: random.range(8.0, 20.0),
+                    forward: random.range(-0.2, 0.2),
+                    width: random.range(0.6, 1.1),
+                    curvature: random.unit(),
+                    seed: [random.unit(), random.unit()],
+                    side,
+                    sway_phase: random.angle(),
                 });
             }
         }
+        kelp
+    }
 
+    /// The schools of small fish.
+    pub fn schools_for(seed: CoveSeed) -> Vec<FishSchool> {
+        let mut random = SplitMix64::new(seed.0);
         let school_count = random.int(2, 3);
-        let schools = (0..school_count)
+        (0..school_count)
             .map(|_| {
                 // Fields are drawn in the order the Swift initialiser lists them.
                 let depth = random.range(0.05, 0.35);
@@ -110,8 +134,6 @@ impl CoveLayout {
                     members,
                 }
             })
-            .collect();
-
-        Self { kelp, schools }
+            .collect()
     }
 }

@@ -11,7 +11,7 @@ pub fn project(point: [f64; 3], aspect: f64) -> Option<(f64, f64, f64)> {
         scene_rules::CAMERA_PITCH.sin(),
     );
     let up = d[1] * cp - d[2] * sp;
-    let ahead = d[1] * sp + d[2] * cp;
+    let ahead = ahead(point);
     if ahead <= 0.3 {
         return None;
     }
@@ -21,4 +21,13 @@ pub fn project(point: [f64; 3], aspect: f64) -> Option<(f64, f64, f64)> {
         0.5 + f * up / ahead,
         (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt(),
     ))
+}
+
+/// How far a point in the water (metres) lies ahead of the camera, along its tilted view axis.
+pub fn ahead(point: [f64; 3]) -> f64 {
+    let (cp, sp) = (
+        scene_rules::CAMERA_PITCH.cos(),
+        scene_rules::CAMERA_PITCH.sin(),
+    );
+    (point[1] + scene_rules::CAMERA_DEPTH) * sp + point[2] * cp
 }

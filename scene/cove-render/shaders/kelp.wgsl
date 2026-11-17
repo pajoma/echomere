@@ -1,131 +1,111 @@
-// Giant kelp as geometry. One mesh (src/kelp.rs) is drawn once per stalk; this shader bends the stalk
-// through the water and hangs the blades on it. Port of `kelp_vertex` from SceneShaders.swift; the
-// fragment is lit by the water model of common.wgsl and writes linear light (`finish()` runs in the
-// composite pass).
+// The kelp frame: long ribbon blades rising at the picture's left and right edges. One mesh (a ribbon strip,
+// src/kelp.rs) is drawn once per blade; this shader bends, twists and sways it. The fragment is lit by the
+// water model of common.wgsl and writes linear light (`finish()` runs in the composite pass).
+//
+// The blade (`kelp_vertex`: its curl, the wave running down it, its twist, its ruffled edges, `sway` and
+// `shape2`) is adapted from abyssal-garden's `W_LEAF` (`src/shaders.js:382-440`), Copyright (c) 2026
+// Maksymilian Dendura, MIT License; see THIRD-PARTY-NOTICES.md. Changes: one kelp type (type 0's colours
+// and shape, a gentler wave and curl for blades this long), no distance fades, no shadow pass, Echomere's own placement (blades lean so they keep their
+// picture x, turned to the screen's shape), a gentle push from the swell, and time from the slowed kelp
+// clock.
 
-const BLADES: f32 = 64.0;                                 // KELP_BLADES in kelp.rs
-const CURRENT: vec2f = vec2f(0.80, 0.60);                 // the way the current flows (x, z)
-const SURGE: vec2f = vec2f(0.60, 0.80);                   // the way the swell pushes the water back and forth
-// The hand-picked stalk and blade colours, decoded, are almost black: this lifts their albedo to olive brown.
-const KELP_ALBEDO_LIFT: f32 = 30.0;
+const ROWS: f32 = 48.0;                                   // BLADE_ROWS in kelp.rs
+const REFERENCE_ASPECT: f32 = 1.6;                        // the picture shape the blades are placed for
+const SWELL_PUSH: f32 = 0.3;                              // metres the swell moves a blade's tip sideways
+const KELP_ALBEDO: f32 = 0.6;                             // lifts type 0's colours to the blade's albedo
 
-// u[0]: aspect, surge, drift, flutter
+// u[0]: aspect, swell surge (radians), kelp time (s), -
 // u[1]: 1 / pixels high, warmth, -, -
 // u[2]: light direction + intensity
 // u[3]: light colour + ambient
 @group(0) @binding(0) var<uniform> u: array<vec4f, 4>;
-@group(0) @binding(1) var displacement: texture_2d_array<f32>;
-@group(0) @binding(2) var sea_sampler: sampler;
 
 struct VIn {
-    @location(0) data: vec4f,                             // s, u, v, blade
-    @location(1) a: vec4f,                                // base x, base depth, base z, length
-    @location(2) b: vec4f,                                // sway phase, twist phase, blade seed, blade scale
+    @location(0) mesh: vec2f,                             // across (-1 or 1), row (0..ROWS-1)
+    @location(1) a: vec4f,                                // root x, y, z, length
+    @location(2) b: vec4f,                                // lean, forward, width, curvature
+    @location(3) c: vec4f,                                // seed 0, seed 1, side, sway phase
 };
 
 struct VOut {
     @builtin(position) position: vec4f,
     @location(0) world: vec3f,
     @location(1) normal: vec3f,
-    @location(2) uv: vec2f,                               // along and across a blade
-    @location(3) @interpolate(flat) blade: f32,           // < 0 for the stalk
-    @location(4) lift: f32,                               // metres above the root
+    @location(2) uv: vec2f,                               // along (0 root, 1 tip) and across (-1..1) the blade
+    @location(3) @interpolate(flat) colour: vec3f,
+    @location(4) lift: f32,                               // metres along the blade from the root
 };
 
-// Height of the long waves at the point x (metres), as in water.wgsl.
-fn height_of(x: vec2f) -> f32 {
-    let push = textureSampleLevel(displacement, sea_sampler, x / cascade_size(0), 0, 0.0);
-    return textureSampleLevel(displacement, sea_sampler, (x - push.xz) / cascade_size(0), 0, 0.0).y;
+fn sway(p: vec2f, h: f32, t: f32) -> vec2f {
+    let ph = dot(p, vec2f(0.031, 0.017));
+    let a = 0.024 * pow(max(h, 0.0), 1.25);
+    return a * (vec2f(sin(t * 0.5 + ph + h * 0.09), cos(t * 0.37 + ph * 1.3 + h * 0.07))
+              + 0.35 * vec2f(sin(t * 1.3 + ph * 3.0 + h * 0.3), cos(t * 1.1 + ph * 2.0 + h * 0.23)));
 }
 
-// A point on the stalk (xyz) and how high it is (w): 0 at the root, 1 at the surface. s runs 0..1 from
-// root to tip.
-fn stalk_point(a: vec4f, b: vec4f, s: f32) -> vec4f {
-    let depth = a.y;
-    let along = s * a.w;
-    let top = depth - 0.6;                                // the stalk levels off just below the surface
-    let below = 1.5 * log(1.0 + exp((top - along) / 1.5));
-    var y = -0.6 - below;
-    let height = top - below;
-    let trail = max(along - height, 0.0);                 // the part lying along the surface
-    let rise = clamp(height / top, 0.0, 1.0);
-
-    var xz = a.xz;
-    xz += CURRENT * (trail * 0.9 + 0.20 * height * rise);               // leans and trails with the current
-    xz += SURGE * (0.52 + 0.79 * rise) * pow(rise, 1.2) * sin(u[0].y - 1.0 * s + b.x);
-    xz += vec2f(-CURRENT.y, CURRENT.x) * 0.3 * rise * sin(u[0].z + b.x * 1.7);
-    // The stalks of one plant wind loosely around each other.
-    xz += 0.16 * vec2f(cos(along * 0.45 + b.y), sin(along * 0.45 + b.y)) * smoothstep_f(0.0, 3.0, along);
-    // The canopy rides the waves.
-    y += smoothstep_f(3.0, 0.5, -y) * height_of(xz);
-    return vec4f(xz.x, y, xz.y, rise);
-}
+fn shape2(v: f32) -> f32 { return sin(3.14159 * saturate(v)); }
 
 @vertex
 fn kelp_vertex(in: VIn) -> VOut {
-    let a = in.a;
-    let b = in.b;
     let aspect = u[0].x;
+    let t = u[0].z;
+    let across = in.mesh.x;
+    let v = sin(in.mesh.y / (ROWS - 1.0) * 1.5708);
+    let len = in.a.w;
+    let width = in.b.z;
+    let s1 = in.c.x;
+    let s2 = in.c.y;
+
+    // Placed for 16:10; on other screens the root and the lean turn with the picture's width.
+    let fit = aspect / REFERENCE_ASPECT;
+    let root = vec3f(in.a.x * fit, in.a.y, in.a.z);
+    let lean = in.b.x * fit;
+    let forward = in.b.y;
+    // Along the blade's line the sideways offset grows with the distance along the view axis, so the
+    // whole blade keeps its picture x.
+    let d = normalize(vec3f(lean * (sin(PITCH) + cos(PITCH) * forward), 1.0, forward));
+    // Bending: perpendicular to the blade, in its vertical plane, away from up (the blade droops outwards).
+    let up = vec3f(0.0, 1.0, 0.0);
+    let pe = normalize(d * dot(up, d) - up);
+    let sd = normalize(cross(d, pe));
+
+    // Type 0 of W_LEAF (fls 1, shape (0.5, 0.32)), with a gentler wave (wav 0.6, not 1.9) and an
+    // outward-only curl (0.10..0.35, not -0.6..1.4): these blades are 8 to 20 m long, not 1 to 3 m, and
+    // W_LEAF's amounts would swing them metres into the middle of the picture or out of it.
+    let wav = 0.6;
+    let k = 0.10 + 0.25 * in.b.w + sin(t * (0.8 + s1) + s2 * 40.0) * 0.03;
+    let wph = v * (3.0 + 5.0 * s2) + s1 * 30.0 + t * 1.1;
+    let wv = sin(wph) * 0.12 * wav;
+    let kq = k * 1.7;
+    let ka = select(kq, 0.06, abs(kq) < 0.06);
+    let sK = sin(ka * v);
+    let cK = cos(ka * v);
+    let c = root + len * (d * (sK / ka) + pe * ((1.0 - cK) / ka + wv * v));
+    let sl = sK + wv + cos(wph) * 0.10 * wav * v * (3.0 + 5.0 * s2);
+    let N = normalize(pe * cK - d * sl);
+    let T0 = normalize(d * cK + pe * sl);
+    let tw = (s1 - 0.5) * 2.4 * v + sin(t * 0.9 + s2 * 20.0) * 0.25 * v;
+    let S = sd * cos(tw) + N * sin(tw);
+    let N2 = N * cos(tw) - sd * sin(tw);
+    let shape = pow(max(sin(3.14159 * pow(v, 0.5)), 0.0), 0.32);
+    let ruf = sin(v * 10.0 + s2 * 30.0 + t * 0.6) * width * 0.36 * across * shape2(v);
+    var p = c + S * (across * width * 0.5 * shape);
+    p += N2 * ruf;
+    let sw = sway(root.xz, p.y - root.y, t);
+    p.x += sw.x;
+    p.z += sw.y;
+    // The swell pushes the whole frame gently back and forth, most at the tips.
+    p.x += SWELL_PUSH * pow(v, 1.5) * sin(u[0].y + in.c.w);
+
     var o: VOut;
-    o.blade = in.data.w;
-    var rise: f32;
-
-    if (in.data.w < 0.0) {                                // the stalk: a ribbon that faces the camera
-        let s = in.data.x;
-        let here = stalk_point(a, b, s);
-        let centre = here.xyz;
-        let ahead = stalk_point(a, b, min(s + 0.01, 1.0)).xyz;
-        let behind = stalk_point(a, b, max(s - 0.01, 0.0)).xyz;
-        let tangent = normalize(ahead - behind);
-        let to_camera = normalize(CAMERA - centre);
-        let side = normalize(cross(tangent, to_camera));
-        // Never thinner than about a pixel, so distant stalks don't break up.
-        let width = max(0.065, length(CAMERA - centre) * u[1].x * 0.9);
-        o.world = centre + side * in.data.z * width;
-        o.normal = to_camera;
-        o.uv = vec2f(s, in.data.z);
-        rise = here.w;
-    } else {
-        let j = in.data.w;
-        let h1 = hash21(vec2f(j, b.z));
-        let h2 = hash21(vec2f(j + 17.0, b.z));
-        let h3 = hash21(vec2f(j + 41.0, b.z));
-        // Blades sit closer together towards the top.
-        let s = 0.06 + 0.94 * pow((j + h1) / BLADES, 0.75);
-        let root = stalk_point(a, b, s);
-        let base = root.xyz;
-        rise = root.w;
-
-        let theta = j * 2.39996 + b.z;
-        // Blades hang off the stalk in all directions and stream with the current.
-        var direction = vec3f(cos(theta), 0.1 + 0.5 * (h2 - 0.5), sin(theta)) * 0.9
-                      + vec3f(CURRENT.x, 0.0, CURRENT.y) * 0.45;
-        // Blades trail behind the stalk as the surge moves it.
-        let velocity = cos(u[0].y - 1.0 * s + b.x);
-        direction -= vec3f(SURGE.x, 0.0, SURGE.y) * velocity * 0.6 * rise;
-        direction = normalize(direction);
-        let across = normalize(cross(direction, vec3f(0.0, 1.0, 0.0)));
-        var normal = cross(across, direction);
-        let twist = h3 * 6.2832;
-        let turned = across * cos(twist) + normal * sin(twist);
-        normal = cross(turned, direction);
-
-        let along = in.data.y;
-        let blade_length = (1.30 + 1.00 * h2) * b.w;
-        let flutter = sin(u[0].w * select(2.0, 1.0, h1 < 0.5) + j * 1.3);
-        let point = base + direction * blade_length * along
-                  + normal * (0.12 * along * along * flutter + 0.05 * along * sin(along * 9.0 + j))
-                  // Blades curl: most upwards towards the light, some downwards.
-                  + vec3f(0.0, select(-0.35, 0.45, h3 < 0.75), 0.0) * along * along * blade_length
-                  + turned * 0.25 * blade_length * along * along * (h1 - 0.5);
-        let half_width = 0.150 * b.w * pow(sin(3.14159 * pow(along, 0.50)), 0.9)
-                       + 0.022 * exp(-pow(along / 0.06, 2.0));          // the gas bladder at the base
-        o.world = point + turned * in.data.z * half_width;
-        o.normal = normal;
-        o.uv = vec2f(along, in.data.z);
-    }
-    o.lift = rise * (a.y - 0.6);
-    o.position = project(o.world, aspect);
+    o.world = p;
+    o.normal = normalize(N2 + S * across * 0.55 - T0 * cos(v * 10.0 + s2 * 30.0 + t * 0.6) * across * 0.7);
+    o.uv = vec2f(v, across);
+    var colour = mix(vec3f(0.11, 0.125, 0.022), vec3f(0.04, 0.10, 0.04), s1);
+    colour = mix(colour, vec3f(0.25, 0.17, 0.025), step(0.72, s2));
+    o.colour = colour;
+    o.lift = v * len;
+    o.position = project(p, aspect);
     return o;
 }
 
@@ -143,23 +123,18 @@ fn kelp_fragment(in: VOut) -> @location(0) vec4f {
     let sunlight = sunlight_at(depth, s);                 // per channel, includes the light's colour
     let ambient = ambient_light(depth, normal, s);
 
-    var c: vec3f;
-    if (in.blade < 0.0) {
-        c = KELP_ALBEDO_LIFT * to_linear(vec3f(0.030, 0.026, 0.012)) * (ambient + 0.6 * sunlight);
-    } else {
-        let lit = saturate(dot(normal, sun));
-        // Sunlight shining through a blade towards the camera glows amber, most at the thin edges.
-        let behind = saturate(dot(-normal, sun) + 0.25);
-        let towards = pow(saturate(dot(-view, sun) * 0.5 + 0.5), 2.0);
-        let through = behind * towards * (0.65 + 0.35 * abs(in.uv.y));
-        c = KELP_ALBEDO_LIFT * to_linear(vec3f(0.060, 0.055, 0.020)) * (ambient + 0.5 * sunlight + 0.7 * lit * sunlight)
+    let lit = saturate(dot(normal, sun));
+    // Sunlight shining through a blade towards the camera glows amber, most at the thin edges.
+    let behind = saturate(dot(-normal, sun) + 0.25);
+    let towards = pow(saturate(dot(-view, sun) * 0.5 + 0.5), 2.0);
+    let through = behind * towards * (0.65 + 0.35 * abs(in.uv.y));
+    var c = KELP_ALBEDO * in.colour * (ambient + 0.5 * sunlight + 0.7 * lit * sunlight)
           + to_linear(vec3f(0.80, 0.62, 0.30)) * sunlight * through * 1.6;
-        c *= 1.0 - 0.30 * smoothstep_f(0.18, 0.0, abs(in.uv.y));         // the midrib
-        c *= 0.92 + 0.08 * sin(in.uv.x * 38.0 + in.blade);               // the wrinkled surface
-    }
+    c *= 1.0 - 0.30 * smoothstep_f(0.18, 0.0, abs(in.uv.y));         // the midrib
+    c *= 0.92 + 0.08 * sin(in.uv.x * 38.0 + in.colour.r * 50.0);     // the wrinkled surface
 
-    // The water between the kelp and the camera; the roots are lost in the gloom near the seabed.
+    // The water between the kelp and the camera; the root is lost in the gloom below.
     let seen = through_water(c, CAMERA, -view, distance, s);
     let gloom = in_scatter(CAMERA, -view, distance, s);
-    return vec4f(mix(gloom, seen, smoothstep_f(0.0, 9.0, in.lift)), 1.0);
+    return vec4f(mix(gloom, seen, smoothstep_f(0.0, 3.0, in.lift)), 1.0);
 }

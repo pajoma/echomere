@@ -49,3 +49,15 @@ fn kelp_sways_same_everywhere() {
 fn sea_runs_slow() {
     assert!((sea::SEA_PACE - 0.25).abs() < 1e-12);
 }
+
+#[test]
+fn kelp_clock_runs_slow() {
+    let a = kelp::motion(NOON);
+    let b = kelp::motion(NOON + 1.0);
+    assert!((b.time - a.time - kelp::KELP_PACE).abs() < 1e-9);
+    assert!(
+        (kelp::motion(NOON + 86_400.0).time - a.time).abs() < 1e-6,
+        "repeats daily"
+    );
+    assert!((kelp::KELP_PACE - 0.4).abs() < 1e-12);
+}

@@ -1,52 +1,28 @@
-//! The kelp pass: one mesh (a stalk and 64 blades) drawn once per frond into the scene target, with depth
-//! test and write. Port of `KelpMesh.swift` and the kelp draw of `CoveSceneRenderer.swift`; the shaders are
-//! `shaders/common.wgsl` and `shaders/kelp.wgsl`.
+//! The kelp pass: a frame of long ribbon blades at the picture's left and right edges, drawn into the scene
+//! target with depth test and write. One mesh (a ribbon strip) is drawn once per blade; the vertex shader
+//! (`shaders/kelp.wgsl`, adapted from abyssal-garden's `W_LEAF`) bends and moves it.
 
 use cove_scene::scene::SceneFrame;
 
-use crate::ocean::Ocean;
 use crate::targets::{COLOR_FORMAT, DEPTH_FORMAT};
 
-/// Segments along the stalk ribbon.
-const STALK_SEGMENTS: usize = 48;
-/// Must match `BLADES` in `kelp.wgsl`.
-const BLADES: usize = 64;
-const BLADE_ROWS: usize = 9;
-/// Bytes of one frond in the instance buffer: two `vec4f`.
-const FROND_STRIDE: u64 = 32;
+/// Rows along a blade: enough that a blade seen 2 m away stays smooth. Must match `ROWS` in `kelp.wgsl`.
+const BLADE_ROWS: usize = 48;
+/// Bytes of one blade in the instance buffer: three `vec4f`.
+const BLADE_STRIDE: u64 = 48;
 
-/// The mesh of one kelp stalk with its blades. The vertices only say where on the stalk they belong; the
-/// vertex shader puts them in the water, so one mesh serves every stalk. Each vertex is (s, u, v, blade):
-/// - stalk: s runs 0..1 from root to tip, v is -1 or 1 across the ribbon, blade is -1;
-/// - blade: u runs 0..1 from base to tip, v runs -1..1 across, blade is the blade's index.
-pub(crate) fn build_mesh() -> (Vec<[f32; 4]>, Vec<u16>) {
-    let mut vertices: Vec<[f32; 4]> = Vec::new();
-    let mut indices: Vec<u16> = Vec::new();
-
-    for i in 0..=STALK_SEGMENTS {
-        let s = i as f32 / STALK_SEGMENTS as f32;
-        vertices.push([s, 0.0, -1.0, -1.0]);
-        vertices.push([s, 0.0, 1.0, -1.0]);
+/// The mesh of one blade: a ribbon strip of `BLADE_ROWS` rows, two vertices each. Each vertex is
+/// (u, row): u is -1 or 1 across the blade, row runs 0..BLADE_ROWS-1 from root to tip.
+pub(crate) fn build_mesh() -> (Vec<[f32; 2]>, Vec<u16>) {
+    let mut vertices = Vec::with_capacity(BLADE_ROWS * 2);
+    for row in 0..BLADE_ROWS {
+        vertices.push([-1.0, row as f32]);
+        vertices.push([1.0, row as f32]);
     }
-    for i in 0..STALK_SEGMENTS {
-        let a = (i * 2) as u16;
+    let mut indices = Vec::with_capacity((BLADE_ROWS - 1) * 6);
+    for row in 0..BLADE_ROWS - 1 {
+        let a = (row * 2) as u16;
         indices.extend_from_slice(&[a, a + 1, a + 2, a + 1, a + 3, a + 2]);
-    }
-
-    for blade in 0..BLADES {
-        let first = vertices.len() as u16;
-        for row in 0..BLADE_ROWS {
-            let u = row as f32 / (BLADE_ROWS - 1) as f32;
-            for v in [-1.0f32, 0.0, 1.0] {
-                vertices.push([0.0, u, v, blade as f32]);
-            }
-        }
-        for row in 0..BLADE_ROWS - 1 {
-            for column in 0..2 {
-                let a = first + (row * 3 + column) as u16;
-                indices.extend_from_slice(&[a, a + 1, a + 3, a + 1, a + 4, a + 3]);
-            }
-        }
     }
     (vertices, indices)
 }
@@ -56,8 +32,8 @@ pub(crate) struct Kelp {
     vertices: wgpu::Buffer,
     indices: wgpu::Buffer,
     index_count: u32,
-    fronds: wgpu::Buffer,
-    /// How many fronds `fronds` has room for.
+    blades: wgpu::Buffer,
+    /// How many blades `blades` has room for.
     capacity: usize,
     uniforms: wgpu::Buffer,
     group: wgpu::BindGroup,
@@ -65,7 +41,7 @@ pub(crate) struct Kelp {
 }
 
 impl Kelp {
-    pub fn new(device: &wgpu::Device, queue: &wgpu::Queue, ocean: &Ocean) -> Self {
+    pub fn new(device: &wgpu::Device, queue: &wgpu::Queue) -> Self {
         let source = [
             include_str!("../shaders/common.wgsl"),
             include_str!("../shaders/kelp.wgsl"),
@@ -75,19 +51,16 @@ impl Kelp {
             label: Some("kelp"),
             source: wgpu::ShaderSource::Wgsl(source.into()),
         });
-        let float4 = |location| wgpu::VertexAttribute {
-            format: wgpu::VertexFormat::Float32x4,
+        let mesh_attributes = [wgpu::VertexAttribute {
+            format: wgpu::VertexFormat::Float32x2,
             offset: 0,
+            shader_location: 0,
+        }];
+        let blade_attributes = [1u32, 2, 3].map(|location| wgpu::VertexAttribute {
+            format: wgpu::VertexFormat::Float32x4,
+            offset: 16 * (location as u64 - 1),
             shader_location: location,
-        };
-        let mesh_attributes = [float4(0)];
-        let frond_attributes = [
-            float4(1),
-            wgpu::VertexAttribute {
-                offset: 16,
-                ..float4(2)
-            },
-        ];
+        });
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("kelp"),
             layout: None,
@@ -97,18 +70,18 @@ impl Kelp {
                 compilation_options: Default::default(),
                 buffers: &[
                     Some(wgpu::VertexBufferLayout {
-                        array_stride: 16,
+                        array_stride: 8,
                         step_mode: wgpu::VertexStepMode::Vertex,
                         attributes: &mesh_attributes,
                     }),
                     Some(wgpu::VertexBufferLayout {
-                        array_stride: FROND_STRIDE,
+                        array_stride: BLADE_STRIDE,
                         step_mode: wgpu::VertexStepMode::Instance,
-                        attributes: &frond_attributes,
+                        attributes: &blade_attributes,
                     }),
                 ],
             },
-            // Blades and the stalk ribbon are seen from both sides.
+            // Blades are seen from both sides.
             primitive: wgpu::PrimitiveState {
                 cull_mode: None,
                 ..Default::default()
@@ -163,47 +136,22 @@ impl Kelp {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            label: Some("kelp sea"),
-            address_mode_u: wgpu::AddressMode::Repeat,
-            address_mode_v: wgpu::AddressMode::Repeat,
-            mag_filter: wgpu::FilterMode::Linear,
-            min_filter: wgpu::FilterMode::Linear,
-            mipmap_filter: wgpu::MipmapFilterMode::Linear,
-            ..Default::default()
-        });
-        let displacement = ocean
-            .displacement
-            .create_view(&wgpu::TextureViewDescriptor {
-                dimension: Some(wgpu::TextureViewDimension::D2Array),
-                ..Default::default()
-            });
         let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("kelp"),
             layout: &pipeline.get_bind_group_layout(0),
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: uniforms.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::TextureView(&displacement),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: wgpu::BindingResource::Sampler(&sampler),
-                },
-            ],
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: uniforms.as_entire_binding(),
+            }],
         });
-        let capacity = 64;
-        let fronds = Self::frond_buffer(device, capacity);
+        let capacity = 16;
+        let blades = Self::blade_buffer(device, capacity);
         Kelp {
             pipeline,
             vertices,
             indices,
             index_count: index_data.len() as u32,
-            fronds,
+            blades,
             capacity,
             uniforms,
             group,
@@ -211,16 +159,16 @@ impl Kelp {
         }
     }
 
-    fn frond_buffer(device: &wgpu::Device, capacity: usize) -> wgpu::Buffer {
+    fn blade_buffer(device: &wgpu::Device, capacity: usize) -> wgpu::Buffer {
         device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("kelp fronds"),
-            size: capacity as u64 * FROND_STRIDE,
+            label: Some("kelp blades"),
+            size: capacity as u64 * BLADE_STRIDE,
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         })
     }
 
-    /// Uploads the frame's fronds and uniforms. Call before submitting the encoder that holds
+    /// Uploads the frame's blades and uniforms. Call before submitting the encoder that holds
     /// [`Kelp::draw`]. `size` is the scene target's size in pixels;
     /// nothing is drawn when `visible` is false.
     pub fn prepare(
@@ -237,24 +185,35 @@ impl Kelp {
         }
         if frame.kelp.len() > self.capacity {
             self.capacity = frame.kelp.len().next_power_of_two();
-            self.fronds = Self::frond_buffer(device, self.capacity);
+            self.blades = Self::blade_buffer(device, self.capacity);
         }
-        let mut fronds: Vec<[f32; 4]> = Vec::with_capacity(frame.kelp.len() * 2);
-        for f in &frame.kelp {
-            fronds.push([
-                f.base_x as f32,
-                f.base_depth as f32,
-                f.base_z as f32,
-                f.length as f32,
-            ]);
-            fronds.push([
-                f.sway_phase as f32,
-                f.twist_phase as f32,
-                f.blade_seed as f32,
-                f.blade_scale as f32,
-            ]);
-        }
-        queue.write_buffer(&self.fronds, 0, bytemuck::cast_slice(&fronds));
+        let blades: Vec<[f32; 4]> = frame
+            .kelp
+            .iter()
+            .flat_map(|b| {
+                [
+                    [
+                        b.root[0] as f32,
+                        b.root[1] as f32,
+                        b.root[2] as f32,
+                        b.length as f32,
+                    ],
+                    [
+                        b.lean as f32,
+                        b.forward as f32,
+                        b.width as f32,
+                        b.curvature as f32,
+                    ],
+                    [
+                        b.seed[0] as f32,
+                        b.seed[1] as f32,
+                        b.side as f32,
+                        b.sway_phase as f32,
+                    ],
+                ]
+            })
+            .collect();
+        queue.write_buffer(&self.blades, 0, bytemuck::cast_slice(&blades));
 
         let sky = &frame.sky;
         let m = &frame.kelp_motion;
@@ -263,8 +222,8 @@ impl Kelp {
             [
                 (size.0 as f64 / size.1 as f64) as f32,
                 m.surge as f32,
-                m.drift as f32,
-                m.flutter as f32,
+                m.time as f32,
+                0.0,
             ],
             [1.0 / size.1 as f32, sky.warmth as f32, 0.0, 0.0],
             v(sky.light_direction, sky.light_intensity),
@@ -281,7 +240,7 @@ impl Kelp {
         pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(0, &self.group, &[]);
         pass.set_vertex_buffer(0, self.vertices.slice(..));
-        pass.set_vertex_buffer(1, self.fronds.slice(..));
+        pass.set_vertex_buffer(1, self.blades.slice(..));
         pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint16);
         pass.draw_indexed(0..self.index_count, 0, 0..self.count);
     }
@@ -292,12 +251,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn mesh_has_the_swift_layout() {
+    fn mesh_is_one_ribbon() {
         let (vertices, indices) = build_mesh();
-        assert_eq!(vertices.len(), 2 * 49 + 64 * 27);
-        assert_eq!(indices.len(), 48 * 6 + 64 * 8 * 2 * 6);
+        assert_eq!(vertices.len(), 2 * BLADE_ROWS);
+        assert_eq!(indices.len(), (BLADE_ROWS - 1) * 6);
         assert!(indices.iter().all(|&i| (i as usize) < vertices.len()));
-        assert_eq!(vertices[2], [1.0 / 48.0, 0.0, -1.0, -1.0]);
-        assert_eq!(vertices[98 + 3], [0.0, 1.0 / 8.0, -1.0, 0.0]);
+        assert_eq!(vertices[3], [1.0, 1.0]);
     }
 }

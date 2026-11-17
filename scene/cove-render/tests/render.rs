@@ -3,7 +3,7 @@
 use cove_render::{Renderer, WhaleModel};
 use cove_scene::model::{CoveSeed, Echo, Visitor, WhaleLook, WhaleSpecies};
 use cove_scene::scene::{CoveScene, SceneFrame};
-use cove_scene::sky;
+use cove_scene::{kelp, sky};
 use std::path::Path;
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
@@ -419,4 +419,50 @@ fn sunset_is_warm_noon_is_blue() {
     let noon = mean_rgb(&rgb(&snapshot(&mut r, &at_hour(12.0))));
     assert!(dusk[0] > dusk[2], "17:00 mean rgb {dusk:?}");
     assert!(noon[0] < noon[2], "noon mean rgb {noon:?}");
+}
+
+// The kelp frames the picture: the pixels it changes lie at the left and right edges, on screens of every
+// shape and at every moment of the swell (kelp design, 2026-11-16).
+#[test]
+fn kelp_keeps_the_middle_free() {
+    let mut r = renderer();
+    for (w, h) in [(320u32, 200u32), (320, 240), (420, 180), (180, 320)] {
+        for i in 0..4 {
+            // In daylight, where the kelp stands out against the water (the test frame's own time is night).
+            let mut with = at_hour(12.0);
+            with.kelp_motion = kelp::motion(with.time + i as f64 * kelp::surge_period() / 4.0);
+            let mut without = with.clone();
+            without.kelp.clear();
+            let (a, b) = (
+                r.snapshot(&with, w, h).unwrap(),
+                r.snapshot(&without, w, h).unwrap(),
+            );
+            let band = (w as f64 * 0.2).floor() as u32;
+            let (mut left, mut right, mut middle) = (0usize, 0usize, 0usize);
+            for y in 0..h {
+                for x in 0..w {
+                    let (p, q) = (a.get_pixel(x, y), b.get_pixel(x, y));
+                    if (0..3).any(|c| (p[c] as i32 - q[c] as i32).abs() > 2) {
+                        if x < band {
+                            left += 1;
+                        } else if x >= w - band {
+                            right += 1;
+                        } else {
+                            middle += 1;
+                        }
+                    }
+                }
+            }
+            let total = (left + right + middle) as f64;
+            let band_pixels = (band * h) as f64;
+            assert!(
+                middle as f64 <= 0.05 * total,
+                "{w}x{h} #{i}: {middle} of {total} changed pixels in the middle"
+            );
+            assert!(
+                left as f64 >= 0.02 * band_pixels && right as f64 >= 0.02 * band_pixels,
+                "{w}x{h} #{i}: left {left}, right {right} of {band_pixels} per band"
+            );
+        }
+    }
 }
