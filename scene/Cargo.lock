@@ -1591,6 +1591,7 @@ dependencies = [
  "clap",
  "cove-render",
  "cove-scene",
+ "cove-swarm",
  "image",
  "pollster",
  "wgpu",

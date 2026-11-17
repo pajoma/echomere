@@ -1,6 +1,6 @@
 use cove_scene::camera;
 use cove_scene::model::CoveSeed;
-use cove_scene::schools::{visits, FishKind, SchoolVisit, LEAD_SPEED};
+use cove_scene::schools::{self, visits, FishKind, SchoolVisit, LEAD_SPEED};
 
 const DAY_START: f64 = 1_794_000_000.0 - (1_794_000_000.0 % 86_400.0);
 
@@ -120,5 +120,19 @@ fn lead_moves_smoothly() {
             assert!(camera >= 10.0, "{camera} m from the camera");
             t += 1.0;
         }
+    }
+}
+
+// The preview's `--school big|small`: a visit of the chosen kind under way at the chosen moment, five
+// seconds in, with the schedule's route rules.
+#[test]
+fn forced_visit_is_under_way() {
+    for kind in [FishKind::Baitfish, FishKind::Mackerel] {
+        let at = 1_794_000_000.0;
+        let v = schools::forced_visit(CoveSeed(5), kind, at);
+        assert_eq!(v.kind, kind);
+        assert!((v.start - (at - 5.0)).abs() < 1e-9 && v.end > at + 60.0);
+        let x = camera::project(v.lead(v.start), 2.333).map_or(-1.0, |p| p.0);
+        assert!(!(0.0..=1.0).contains(&x), "enters out of sight");
     }
 }

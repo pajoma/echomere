@@ -25,6 +25,8 @@ use clap::Parser;
 use cove_render::Renderer;
 use cove_scene::model::{scene_rules, CoveSeed, Echo, Visitor};
 use cove_scene::scene::{CoveScene, SceneFrame};
+use cove_scene::schools::{self, FishKind, SchoolVisit};
+use cove_swarm::Swarm;
 use cove_scene::sky::{self, SkyState};
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, KeyEvent, WindowEvent};
@@ -80,6 +82,17 @@ struct Options {
     /// Prints the frame rate and the GPU time per frame (from timestamp queries, when the adapter has them).
     #[arg(long)]
     stats: bool,
+    /// Brings a school by now: `big` (baitfish) or `small` (mackerel), for snapshots, clips and tuning.
+    #[arg(long, value_parser = parse_school)]
+    school: Option<FishKind>,
+}
+
+fn parse_school(value: &str) -> Result<FishKind, String> {
+    match value {
+        "big" => Ok(FishKind::Baitfish),
+        "small" => Ok(FishKind::Mackerel),
+        _ => Err(format!("`{value}` is not a school: use big or small")),
+    }
 }
 
 fn parse_size(value: &str) -> Result<(u32, u32), String> {
@@ -130,6 +143,10 @@ struct Cove {
     scene: CoveScene,
     visitors: Vec<Visitor>,
     echoes: Vec<Echo>,
+    /// This screen's simulation of the fish schools (ADR 0009: each screen swims them its own way).
+    swarm: Swarm,
+    /// A visit brought by `--school`, on top of the schedule's.
+    forced: Option<SchoolVisit>,
 }
 
 impl Cove {
@@ -140,11 +157,23 @@ impl Cove {
             scene: CoveScene::new(CoveSeed(seed)),
             visitors: sample_cove::visitors(seed, options.whales, visitors_now),
             echoes: sample_cove::echoes(seed, options.echoes, now),
+            swarm: Swarm::new(seed),
+            forced: options
+                .school
+                .map(|kind| schools::forced_visit(CoveSeed(seed), kind, now)),
         }
     }
 
-    fn frame(&self, at: f64, sky: Option<SkyState>) -> SceneFrame {
+    /// The scene at `at`, with this screen's fish swum up to `at`.
+    fn frame(&mut self, at: f64, sky: Option<SkyState>) -> SceneFrame {
         let mut frame = self.scene.frame(at, &self.visitors, &self.echoes);
+        if let Some(v) = &self.forced {
+            if v.start <= at && at < v.end {
+                frame.visits.push(v.clone());
+            }
+        }
+        self.swarm.advance(&frame.visits, at);
+        frame.fish = self.swarm.poses();
         if let Some(sky) = sky {
             frame.sky = sky;
         }
@@ -180,7 +209,7 @@ fn headless(options: &Options) -> Result<Renderer, String> {
 fn write_snapshot(options: &Options, path: &str) -> Result<(), String> {
     let mut renderer = headless(options)?;
     let time = options.start_time();
-    let cove = Cove::new(options.seed, options, time - 600.0, time);
+    let mut cove = Cove::new(options.seed, options, time - 600.0, time);
     let frame = cove.frame(time, options.sky(0.0));
     let (width, height) = options.size;
     let image = renderer
@@ -200,11 +229,12 @@ fn write_snapshot(options: &Options, path: &str) -> Result<(), String> {
         })
         .collect();
     println!(
-        "Wrote {path}: seed {}, {} whales ({}), {} school visits, {} kelp, {} echoes",
+        "Wrote {path}: seed {}, {} whales ({}), {} school visits ({} fish), {} kelp, {} echoes",
         options.seed,
         frame.whales.len(),
         distances.join(", "),
         frame.visits.len(),
+        frame.fish.len(),
         frame.kelp.len(),
         frame.echoes.len()
     );
@@ -214,7 +244,7 @@ fn write_snapshot(options: &Options, path: &str) -> Result<(), String> {
 fn write_frames(options: &Options, directory: &str) -> Result<(), String> {
     let mut renderer = headless(options)?;
     let start = options.start_time();
-    let cove = Cove::new(options.seed, options, start - 600.0, start);
+    let mut cove = Cove::new(options.seed, options, start - 600.0, start);
     let fps = f64::from(options.fps);
     let count = (options.seconds * fps) as usize;
     std::fs::create_dir_all(directory).map_err(|e| format!("Frames failed: {e}"))?;

@@ -191,12 +191,12 @@ fn visit_in_slot(seed: CoveSeed, kind: FishKind, slot: i64) -> SchoolVisit {
     // In from one side, out of the other, both beyond the edge of the picture at any shape (21:9 too).
     let side = if random.next() & 1 == 0 { -1.0 } else { 1.0 };
     let entry = point(
-        random.range(12.0, 30.0),
+        random.range(10.0, 18.0),
         random.range(8.0, 24.0),
         side * 2.2,
     );
     let exit = point(
-        random.range(12.0, 30.0),
+        random.range(10.0, 18.0),
         random.range(8.0, 24.0),
         -side * 2.2,
     );
@@ -259,4 +259,18 @@ pub fn visits(seed: CoveSeed, at: f64) -> Vec<SchoolVisit> {
             .then(a.id.cmp(&b.id))
     });
     found
+}
+
+/// A visit of `kind` under way at `at`, five seconds in, with the schedule's route rules: for the preview's
+/// `--school`, to show a school on demand. It is the visit of `at`'s slot moved in time.
+pub fn forced_visit(seed: CoveSeed, kind: FishKind, at: f64) -> SchoolVisit {
+    let mut visit = visit_in_slot(seed, kind, (at / kind.slot()).floor() as i64);
+    let shift = at - 5.0 - visit.start;
+    visit.start += shift;
+    visit.end += shift;
+    if let Some(c) = visit.circling.as_mut() {
+        c.start += shift;
+        c.end += shift;
+    }
+    visit
 }
