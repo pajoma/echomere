@@ -48,11 +48,14 @@ fn crossing(id: u64, kind: FishKind, count: usize, start: f64, side: f64) -> Sch
     }
 }
 
+/// The seeds `informed_fish_lead_the_school` runs with: each must pass.
+const SEEDS: [u64; 5] = [7, 9, 21, 33, 48];
+
 /// A baitfish visit that circles overhead for two minutes on its way across, on the widest circle the
-/// schedule draws (10 m).
+/// schedule draws (8 m).
 fn circling(id: u64, start: f64) -> SchoolVisit {
     let mut visit = crossing(id, FishKind::Baitfish, 350, start, -1.0);
-    let (centre, radius) = (water(22.0, 14.0, 0.0), 10.0);
+    let (centre, radius) = (water(22.0, 14.0, 0.0), 8.0);
     let joined = start + (distance(visit.entry, centre) - radius) / LEAD_SPEED;
     let circle = Circling {
         start: joined,
@@ -165,16 +168,21 @@ fn school_stays_together() {
 
 #[test]
 fn fish_keep_their_distance() {
-    let visit = crossing(1, FishKind::Baitfish, 350, T0, -1.0);
-    let mut swarm = Swarm::new(3);
-    let mut least = f64::INFINITY;
-    run(&mut swarm, &[visit], T0, T0 + 60.0, |at, swarm| {
-        if on_the_second(at, T0) {
-            least = least.min(closest(&swarm.poses()));
-        }
-    });
-    println!("closest {least:.3} body lengths");
-    assert!(least >= 0.5, "{least} body lengths");
+    // A school on its way across, and one that arrives at its circle, loosens and mills.
+    let crossing = crossing(1, FishKind::Baitfish, 350, T0, -1.0);
+    let circle = circling(2, T0);
+    let arrives = circle.circling.expect("circles").start - 5.0;
+    for (visit, from) in [(crossing, T0), (circle, arrives)] {
+        let mut swarm = Swarm::new(3);
+        let mut least = f64::INFINITY;
+        run(&mut swarm, &[visit], from, from + 60.0, |at, swarm| {
+            if on_the_second(at, from) {
+                least = least.min(closest(&swarm.poses()));
+            }
+        });
+        println!("closest {least:.3} body lengths");
+        assert!(least >= 0.5, "{least} body lengths");
+    }
 }
 
 #[test]
@@ -205,11 +213,15 @@ fn schools_do_not_overlap() {
 
 #[test]
 fn informed_fish_lead_the_school() {
-    for visit in [
+    let visits = [
         circling(1, T0),
         crossing(2, FishKind::Mackerel, 50, T0, 1.0),
-    ] {
-        let mut swarm = Swarm::new(9);
+    ];
+    for (visit, seed) in visits
+        .iter()
+        .flat_map(|v| SEEDS.map(|seed| (v.clone(), seed)))
+    {
+        let mut swarm = Swarm::new(seed);
         let mut farthest: f64 = 0.0;
         let all = [visit.clone()];
         run(
@@ -225,7 +237,7 @@ fn informed_fish_lead_the_school() {
             },
         );
         println!(
-            "{:?}: centre at most {farthest:.2} m from the lead",
+            "{:?}, seed {seed}: centre at most {farthest:.2} m from the lead",
             visit.kind
         );
         assert!(farthest <= 12.0, "{farthest} m");

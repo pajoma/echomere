@@ -207,7 +207,7 @@ fn visit_in_slot(seed: CoveSeed, kind: FishKind, slot: i64) -> SchoolVisit {
         random.range(8.0, 24.0),
         random.range(-0.1, 0.1),
     );
-    let radius = random.range(6.0, 10.0);
+    let radius = random.range(6.0, 8.0);
 
     let mut visit = SchoolVisit {
         id,

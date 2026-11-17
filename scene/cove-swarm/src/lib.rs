@@ -9,16 +9,24 @@
 //! Each fish looks at the others in three zones around it, measured in its body lengths. Too close (the
 //! zone of repulsion) it turns away and ignores everything else. Otherwise it turns to swim like the fish of
 //! its school in the zone of orientation and towards those in the zone of attraction beyond it, but not at
-//! fish in the blind angle behind it. It swims at a constant speed, turns at most so fast (faster when it
-//! darts away from a fish too close), and prefers to swim level. A wide zone of orientation gives a parallel group, a narrow one a torus (a mill).
+//! fish in the blind angle behind it. It swims at a constant speed and turns at most so fast (faster when it
+//! darts away from a fish too close). A wide zone of orientation gives a parallel group, a narrow one a
+//! torus (a mill).
+//!
+//! Two additions to the papers' model:
+//! - Fish prefer to swim level (the vertical part of their wish is damped). Without it a torus tilts and
+//!   rarely settles; with it, it mills round the vertical, as the circling route means.
+//! - Bodies do not pass through each other: after each step, fish closer than 0.6 of a body length are
+//!   moved apart. The turning rules keep them apart almost always; this catches the rest.
 //!
 //! A circling school mills over the middle of its circle while the route's lead goes round it. Couzin's
 //! model has a memory: a parallel group whose zone of orientation narrows stays parallel, and only a
 //! disordered one settles into a torus. So the school first swims to the middle (as a parallel group led
-//! by its informed fish), loosens there for a few seconds (no orientation zone, much more noise, quicker
-//! turns: the group loses its common heading), and then narrows its orientation zone and mills round the
-//! middle. If it drifts off instead, it swims back and tries again. It sets off after the lead a little
-//! before the circling ends, so that it is under way when the lead leaves.
+//! by its informed fish), loosens there (no orientation zone, much more noise, quicker turns) until it has
+//! lost its common heading, and then narrows its orientation zone and mills round the middle, its informed
+//! fish swimming round the way the lead goes. If it drifts off instead, it swims back and tries again. It
+//! sets off after the lead a while before the circling ends, widening its zone of orientation gradually.
+//! The loosening may look abrupt: it is to be tuned by eye in the preview (Task 4).
 
 use cove_scene::scene::FishPose;
 use cove_scene::schools::{FishKind, SchoolVisit};
@@ -54,6 +62,10 @@ const BLIND_COS: f64 = std::f64::consts::FRAC_1_SQRT_2;
 const TURN_RATE: f64 = 3.0;
 /// The fastest turn away from a fish too close (a darting escape), in radians per second.
 const ESCAPE_TURN_RATE: f64 = 10.0;
+/// No two fish end a step closer than this share of the larger one's body length, after at most this many
+/// passes of moving them apart (a pass can push a fish into a third).
+const CLOSEST: f64 = 0.6;
+const SEPARATION_PASSES: usize = 4;
 /// The standard deviation of the angular noise, in radians per step.
 const NOISE: f64 = 0.03;
 /// How much of the wish to climb or dive a fish follows (fish prefer to swim level).
@@ -68,17 +80,25 @@ const PULL_DISTANCE: f64 = 6.0;
 
 /// Circling: the school loosens once its centre is this close to the middle of the circle (metres) ...
 const ARRIVED: f64 = 2.0;
-/// ... for this long (seconds), with this noise (radians per step) and turning rate (radians per second).
-const LOOSEN_TIME: f64 = 5.0;
+/// ... for at least this long (seconds) and until its polarisation is below `LOOSE` (or at most for
+/// `LOOSEN_TIME_MAX`), with this noise (radians per step) and turning rate (radians per second).
+const LOOSEN_TIME: f64 = 3.0;
+const LOOSE: f64 = 0.1;
+const LOOSEN_TIME_MAX: f64 = 10.0;
 const LOOSEN_NOISE: f64 = 0.6;
 const LOOSEN_TURN_RATE: f64 = 6.0;
 /// While it mills, its informed fish feel the full pull back to the middle from this far off (metres).
 const MILL_PULL_DISTANCE: f64 = 1.0;
+/// How strongly the informed fish of a milling school want to swim round its middle (the way the lead
+/// goes), next to OMEGA's pull to the middle: enough to tip a disordered school into a mill.
+const SPIN: f64 = 1.0;
 /// A school whose centre drifts this far from the middle (metres) has not settled into a mill: it swims
 /// back and loosens again.
 const DRIFTED: f64 = 6.0;
+/// ... and widens its zone of orientation back over this long (seconds).
+const WIDEN_TIME: f64 = 10.0;
 /// It sets off after the lead this long before the circling ends (seconds).
-const LEAVE_EARLY: f64 = 10.0;
+const LEAVE_EARLY: f64 = 15.0;
 
 /// Fish keep this far below the surface (metres, y is up) and outside this sphere around the camera, and
 /// start to turn away a metre before.
@@ -161,8 +181,18 @@ struct School {
     visit: SchoolVisit,
     /// When it was put in the water.
     spawned: f64,
-    /// When it reached the middle of its circle, while it circles.
-    arrived: Option<f64>,
+    /// Where it is in its circling.
+    phase: Phase,
+}
+
+/// The steps of a circling school.
+#[derive(Clone, Copy, PartialEq)]
+enum Phase {
+    /// On its way to the middle of the circle (and on its route when not circling).
+    Gather,
+    /// Losing its common heading, since this moment.
+    Loosen(f64),
+    Mill,
 }
 
 /// What a school does during one step.
@@ -172,6 +202,8 @@ struct Behaviour {
     /// Where its informed fish want to go, and from how far off (metres) they feel its full pull.
     goal: Vec3,
     pull: f64,
+    /// While milling, the way round the goal the informed fish also want to swim (+1 or -1, 0 for none).
+    spin: f64,
     noise: f64,
     turn_rate: f64,
 }
@@ -182,31 +214,48 @@ impl School {
             orientation: ORIENTATION,
             goal: self.visit.lead(time),
             pull: PULL_DISTANCE,
+            spin: 0.0,
             noise: NOISE,
             turn_rate: TURN_RATE,
         };
         let Some(c) = self.visit.circling.filter(|_| self.circles(time)) else {
+            // Setting off from the mill: the zone of orientation widens gradually, so that the informed
+            // fish turn the school towards the lead before it lines up in some other direction.
+            if let Some(c) = self.visit.circling {
+                let since = time - (c.end - LEAVE_EARLY);
+                if (0.0..LEAVE_EARLY).contains(&since) {
+                    let share = (since / WIDEN_TIME).min(1.0);
+                    return Behaviour {
+                        orientation: ORIENTATION_MILLING
+                            + (ORIENTATION - ORIENTATION_MILLING) * share,
+                        ..travel
+                    };
+                }
+            }
             return travel;
         };
-        match self.arrived {
+        match self.phase {
             // Swim to the middle as a parallel group.
-            None => Behaviour {
+            Phase::Gather => Behaviour {
                 goal: c.centre,
                 ..travel
             },
             // Loosen.
-            Some(at) if time - at < LOOSEN_TIME => Behaviour {
+            Phase::Loosen(_) => Behaviour {
                 orientation: REPULSION,
                 goal: c.centre,
                 pull: MILL_PULL_DISTANCE,
+                spin: 0.0,
                 noise: LOOSEN_NOISE,
                 turn_rate: LOOSEN_TURN_RATE,
             },
             // Mill.
-            Some(_) => Behaviour {
+            Phase::Mill => Behaviour {
                 orientation: ORIENTATION_MILLING,
                 goal: c.centre,
                 pull: MILL_PULL_DISTANCE,
+                // The way the lead goes round (see `Circling` in cove-scene).
+                spin: if self.visit.entry[0] < 0.0 { 1.0 } else { -1.0 },
                 ..travel
             },
         }
@@ -426,7 +475,7 @@ impl Swarm {
         self.schools.push(School {
             visit: visit.clone(),
             spawned: time,
-            arrived: None,
+            phase: Phase::Gather,
         });
         let centre = visit.lead(time);
         let ahead = unit(sub(visit.lead(time + 1.0), visit.lead(time - 1.0)))
@@ -484,33 +533,42 @@ impl Swarm {
                 continue;
             };
             if !school.circles(time) {
-                school.arrived = None;
+                school.phase = Phase::Gather;
                 continue;
             }
-            let (mut sum, mut n) = ([0.0; 3], 0.0);
+            let (mut sum, mut heading, mut n) = ([0.0; 3], [0.0; 3], 0.0);
             for f in self.fish.iter().filter(|f| f.school == index) {
                 sum = add(sum, f.position);
+                heading = add(heading, f.heading);
                 n += 1.0;
             }
             if n == 0.0 {
                 continue;
             }
             let off = length(sub(scale(sum, 1.0 / n), c.centre));
-            match school.arrived {
-                None => {
+            let polarisation = length(heading) / n;
+            school.phase = match school.phase {
+                Phase::Gather => {
                     // However the school came, it has had time to get there.
                     let late = time - c.start.max(school.spawned)
                         > 2.0 * c.radius / speed(school.visit.kind);
                     if off < ARRIVED || late {
-                        school.arrived = Some(time);
+                        Phase::Loosen(time)
+                    } else {
+                        Phase::Gather
                     }
                 }
-                Some(at) => {
-                    if time - at > LOOSEN_TIME && off > DRIFTED {
-                        school.arrived = None;
+                Phase::Loosen(since) => {
+                    let loose = time - since >= LOOSEN_TIME && polarisation < LOOSE;
+                    if loose || time - since >= LOOSEN_TIME_MAX {
+                        Phase::Mill
+                    } else {
+                        Phase::Loosen(since)
                     }
                 }
-            }
+                Phase::Mill if off > DRIFTED => Phase::Gather,
+                Phase::Mill => Phase::Mill,
+            };
         }
     }
 
@@ -563,6 +621,83 @@ impl Swarm {
             let v = speed(self.schools[f.school].visit.kind);
             f.position = add(f.position, scale(f.heading, v * STEP));
             f.tail_phase = (f.tail_phase + TAU * v / f.size * STEP) % TAU;
+        }
+        self.keep_apart();
+    }
+
+    /// Bodies do not pass through each other: where the turning rules (a turn rate, a constant speed) leave
+    /// two fish closer than `CLOSEST` of the larger one's length (in a loosening burst, say), both are
+    /// moved apart along the line between them. Only positions change; headings stay the model's.
+    fn keep_apart(&mut self) {
+        let cell = self.fish.iter().map(|f| f.size).fold(0.0, f64::max) * CLOSEST;
+        if cell <= 0.0 {
+            return;
+        }
+        // Each pair once: a cell and the 13 of its neighbours that come after it.
+        let mut forward = Vec::with_capacity(14);
+        for dx in -1..=1i64 {
+            for dy in -1..=1i64 {
+                for dz in -1..=1i64 {
+                    if (dx, dy, dz) >= (0, 0, 0) {
+                        forward.push([dx, dy, dz]);
+                    }
+                }
+            }
+        }
+        let mut keyed: Vec<(u64, usize)> = Vec::with_capacity(self.fish.len());
+        let mut cells: Vec<(u64, usize, usize)> = Vec::new();
+        for _ in 0..SEPARATION_PASSES {
+            keyed.clear();
+            keyed.extend(
+                self.fish
+                    .iter()
+                    .enumerate()
+                    .map(|(i, f)| (pack(cell_of(f.position, cell)), i)),
+            );
+            keyed.sort_unstable();
+            cells.clear();
+            for (n, &(key, _)) in keyed.iter().enumerate() {
+                match cells.last_mut() {
+                    Some(last) if last.0 == key => last.2 = n + 1,
+                    _ => cells.push((key, n, n + 1)),
+                }
+            }
+            let mut moved = false;
+            for &(_, from, to) in &cells {
+                let home = cell_of(self.fish[keyed[from].1].position, cell);
+                for offset in &forward {
+                    let key = pack([
+                        home[0] + offset[0],
+                        home[1] + offset[1],
+                        home[2] + offset[2],
+                    ]);
+                    let Ok(k) = cells.binary_search_by_key(&key, |c| c.0) else {
+                        continue;
+                    };
+                    let (start, end) = (cells[k].1, cells[k].2);
+                    let same = *offset == [0, 0, 0];
+                    for a in from..to {
+                        for b in if same { a + 1 } else { start }..end {
+                            let (i, j) = (keyed[a].1, keyed[b].1);
+                            let least = self.fish[i].size.max(self.fish[j].size) * CLOSEST;
+                            let d = sub(self.fish[j].position, self.fish[i].position);
+                            let squared = dot(d, d);
+                            if squared >= least * least {
+                                continue;
+                            }
+                            let distance = squared.sqrt();
+                            let along = unit(d).unwrap_or(self.fish[i].heading);
+                            let push = scale(along, 0.5 * (least - distance));
+                            self.fish[i].position = sub(self.fish[i].position, push);
+                            self.fish[j].position = add(self.fish[j].position, push);
+                            moved = true;
+                        }
+                    }
+                }
+            }
+            if !moved {
+                break;
+            }
         }
     }
 
@@ -686,6 +821,12 @@ impl Swarm {
             let d = length(to_goal).max(1e-9);
             let weight = OMEGA * (d / b.pull).min(1.0);
             direction = add(direction, scale(to_goal, weight / d));
+            let (rx, rz) = (-to_goal[0], -to_goal[2]);
+            let r = rx.hypot(rz);
+            if b.spin != 0.0 && r > 1e-6 {
+                let round = [-b.spin * rz / r, 0.0, b.spin * rx / r];
+                direction = add(direction, scale(round, SPIN));
+            }
         }
         direction[1] *= LEVEL;
         (unit(direction).unwrap_or(me.heading), false)
