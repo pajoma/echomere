@@ -6,8 +6,8 @@ use std::f64::consts::PI;
 
 /// The kelp is a frame of long ribbon blades at the picture's left and right edges, moving like the
 /// blades of abyssal-garden (`W_LEAF`). How fast the blades' own motion runs against real time (owner,
-/// 2026-11-16: meditative).
-pub const KELP_PACE: f64 = 0.4;
+/// 2026-11-17: "even a bit slower", the same pace as the sea).
+pub const KELP_PACE: f64 = 0.25;
 
 /// One kelp blade, rooted below the picture near one of its side edges. Distances in metres: x is to the
 /// right of the camera, y up with the surface at 0, z ahead.

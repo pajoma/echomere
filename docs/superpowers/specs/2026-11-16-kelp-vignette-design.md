@@ -116,6 +116,15 @@ Designer's calls, for the owner to check:
   Activity Monitor comparison on the Mac (port plan Task 9) is the real measurement; lavapipe timings are
   not.
 
+## Tuned values (after the build, with the owner)
+
+- `KELP_PACE` = 0.25 (owner, 2026-11-17: "could even a bit slower"), the same pace as the sea.
+- abyssal-garden's type-0 wave amplitude 1.9 → 0.6, and an outward-only curl (0.10–0.35 instead of
+  −0.6–1.4): these blades are 8–20 m long, not 1–3 m.
+- Roots 4–14 % in from the edges, the blade's line heading for 8–16 % in, so the outward curl brings the
+  tips back towards the edge; blade width 0.6–1.1 m.
+- `SWELL_PUSH` 0.3 m, `KELP_ALBEDO` 0.6, type 0's colours.
+
 ## Checks (replace today's kelp checks)
 
 - `kelp_frames_the_picture` (cove-scene): every blade's root is below the picture (below its bottom edge at

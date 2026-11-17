@@ -59,5 +59,5 @@ fn kelp_clock_runs_slow() {
         (kelp::motion(NOON + 86_400.0).time - a.time).abs() < 1e-6,
         "repeats daily"
     );
-    assert!((kelp::KELP_PACE - 0.4).abs() < 1e-12);
+    assert!((kelp::KELP_PACE - 0.25).abs() < 1e-12);
 }
