@@ -58,6 +58,9 @@ The finishing step in `scene/cove-render/shaders/composite.wgsl` (exposure, ACES
 and desaturation) is ported from abyssal-garden's final composite (`W_POST` in `src/shaders.js`), without its
 light shafts and bloom. The water lighting model (extinction and diffuse attenuation per channel, in-scattered
 light, ambient light) follows abyssal-garden's water as well.
+The kelp blades in `scene/cove-render/shaders/kelp.wgsl` (`kelp_vertex`, `sway`, `shape2`: the blade's curl,
+the wave running down it, its twist, ruffled edges and sway) are adapted from abyssal-garden's leaf shader
+(`W_LEAF`, `src/shaders.js` lines 382-440).
 
 - Source: https://github.com/noniv/abyssal-garden
 - Copyright (c) 2026 Maksymilian Dendura

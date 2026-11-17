@@ -117,7 +117,11 @@ Designer's calls, for the owner to check:
   Activity Monitor comparison on the Mac (port plan Task 9) is the real measurement; lavapipe timings are
   not.
 
-## Tuned values (after the build, with the owner)
+## Tuned values (after the build)
+
+The owner set `KELP_PACE`; the other values are the builder's calls, made to keep the blades in the frame,
+for the owner to check (in particular the bottom corners, where a wide blade close to the camera reaches
+furthest in).
 
 - `KELP_PACE` = 0.25 (owner, 2026-11-17: "could even a bit slower"), the same pace as the sea.
 - abyssal-garden's type-0 wave amplitude 1.9 → 0.6, and an outward-only curl (0.10–0.35 instead of

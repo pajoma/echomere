@@ -422,15 +422,16 @@ fn sunset_is_warm_noon_is_blue() {
 }
 
 // The kelp frames the picture: the pixels it changes lie at the left and right edges, on screens of every
-// shape and at every moment of the swell (kelp design, 2026-11-16).
+// shape and at every moment of the swell and the sway (kelp design, 2026-11-16).
 #[test]
 fn kelp_keeps_the_middle_free() {
     let mut r = renderer();
     for (w, h) in [(320u32, 200u32), (320, 240), (420, 180), (180, 320)] {
-        for i in 0..4 {
+        // Eight moments over 175 s: the swell's push (44 s) and the blades' slower sway (~50 s and more).
+        for i in 0..8 {
             // In daylight, where the kelp stands out against the water (the test frame's own time is night).
             let mut with = at_hour(12.0);
-            with.kelp_motion = kelp::motion(with.time + i as f64 * kelp::surge_period() / 4.0);
+            with.kelp_motion = kelp::motion(with.time + i as f64 * 25.0);
             let mut without = with.clone();
             without.kelp.clear();
             let (a, b) = (
