@@ -88,7 +88,8 @@ Designer's calls, for the owner to check:
   for the 16:10 reference picture, and the vertex shader scales each root's sideways position, and the
   sideways part of each blade's lean, by `aspect / 1.6`, so root and tip keep to the edges on every screen
   (with the root alone, a 21:9 screen would pull the tips towards the middle). The blades are turned, not
-  stretched: their width and length stay.
+  stretched: their length stays, and so does their width from 16:10 up; on narrower screens (4:3, portrait)
+  they narrow by `aspect / 1.6`, or they would fill a portrait picture.
 - **Swell**: on top of the `W_LEAF` sway, the whole frame is pushed gently back and forth by the swell
   (today's `surge`, period from the swell, now about 44 s), so the kelp keeps time with the waves above it.
   The old `drift` and `flutter` cycles go.

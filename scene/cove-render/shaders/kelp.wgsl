@@ -5,9 +5,9 @@
 // The blade (`kelp_vertex`: its curl, the wave running down it, its twist, its ruffled edges, `sway` and
 // `shape2`) is adapted from abyssal-garden's `W_LEAF` (`src/shaders.js:382-440`), Copyright (c) 2026
 // Maksymilian Dendura, MIT License; see THIRD-PARTY-NOTICES.md. Changes: one kelp type (type 0's colours
-// and shape, a gentler wave and curl for blades this long), no distance fades, no shadow pass, Echomere's own placement (blades lean so they keep their
-// picture x, turned to the screen's shape), a gentle push from the swell, and time from the slowed kelp
-// clock.
+// and shape, a gentler wave and curl for blades this long), no distance fades, no shadow pass, Echomere's
+// own placement (blades lean so they keep their picture x, turned to the screen's shape and narrower on
+// narrow screens), a gentle push from the swell, and time from the slowed kelp clock.
 
 const ROWS: f32 = 48.0;                                   // BLADE_ROWS in kelp.rs
 const REFERENCE_ASPECT: f32 = 1.6;                        // the picture shape the blades are placed for
@@ -52,7 +52,8 @@ fn kelp_vertex(in: VIn) -> VOut {
     let across = in.mesh.x;
     let v = sin(in.mesh.y / (ROWS - 1.0) * 1.5708);
     let len = in.a.w;
-    let width = in.b.z;
+    // On screens narrower than 16:10 the blades narrow too, or they would fill a portrait picture.
+    let width = in.b.z * min(1.0, aspect / REFERENCE_ASPECT);
     let s1 = in.c.x;
     let s2 = in.c.y;
 
