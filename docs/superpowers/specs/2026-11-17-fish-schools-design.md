@@ -82,15 +82,16 @@ Designer's calls, for the owner to check:
 - **Fish types**: the big school is small silver baitfish (sardine-like, about 15–20 cm), the small school
   larger, darker fish (mackerel-like, about 30–40 cm).
 - **Schedule (shared)**: `cove-scene` computes, from the cove seed and the time, the visits of each school:
-  start, duration, type, size, entry and exit points. The big school about every 5–10 minutes for 1–3
-  minutes; the small school more often (about every 2–4 minutes) and longer (2–5 minutes). Visits never
-  depend on the frame before.
+  start, duration, type, size, entry and exit points and route. The big school starts every 5¼–9¾ minutes;
+  the small school every 4–6 minutes. A visit lasts as long as its route takes at the lead speed (about 2–3
+  minutes, plus 1–2 minutes of circling for some big-school visits), so the small school is in the water about
+  half the time and the big one about a quarter. (The first draft's "every 2–4 minutes for 2–5 minutes" would
+  have made the small school overlap itself.) Visits never depend on the frame before.
 - **Simulation (per screen)**: a new crate `cove-swarm` (pure Rust, no GPU, stateful): Couzin zones with a
   blind angle and a maximum turning rate, a fixed time step with sub-steps, and a few informed fish whose
   preferred direction leads the school from its entry point, across the picture (sometimes into a circling
   phase overhead, by widening the orientation zone over time), to its exit point. Schools spawn outside the
-  picture when a visit starts and are removed after they have left it. Speeds are slow and paced like the
-  sea (`SEA_PACE`-like constant).
+  picture when a visit starts and are removed after they have left it. Speeds are slow (see Time step and pace).
 - **Space**: schools swim in the middle distance, behind the kelp frame (about 10–40 m from the camera), between
   the camera depth and a few metres below the surface. They avoid a sphere around the camera and, once
   whales are back, a capsule around each whale.
@@ -107,9 +108,10 @@ Designer's calls, for the owner to check:
   snapshots) during a visit, it spawns the school as a loose parallel group around the route's lead point at
   that moment, heading along the route, and simulates a short warm-up (about 3 s of simulated time, in
   sub-steps) before the first frame. No visit is skipped, and nothing is fast-forwarded from the visit's start.
-- **Time step**: the simulation takes the real time since the last frame, clamped to 0.25 s (longer gaps,
-  such as after sleep, are treated as a new start, as above), scaled by `FISH_PACE` (start 0.4, tuned with
-  the owner), and integrates in fixed sub-steps of 1/30 s of simulated time.
+- **Time step and pace**: the simulation takes the real time since the last frame (a gap over 0.25 s, such
+  as after sleep, is a new start, as above) and integrates in fixed sub-steps of 1/30 s. The pace is set by
+  slow swimming speeds (baitfish 1.1 m/s, mackerel 1.3 m/s, the route's lead point 0.9 m/s), tuned with the
+  owner, rather than by slowing time: the route is shared in real time, so the fish must keep up with it.
 - **World frame**: fish positions are in the scene's world frame, the same as `WhalePose` and the kelp (x
   right, y up with the surface at 0, z ahead, camera at (0, −30, 0), pitched 40° up). "In the picture" means
   `camera::project` returns x and y in 0..1; entry and exit points lie outside the picture for every
