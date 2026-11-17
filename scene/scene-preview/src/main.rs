@@ -200,11 +200,11 @@ fn write_snapshot(options: &Options, path: &str) -> Result<(), String> {
         })
         .collect();
     println!(
-        "Wrote {path}: seed {}, {} whales ({}), {} fish, {} kelp, {} echoes",
+        "Wrote {path}: seed {}, {} whales ({}), {} school visits, {} kelp, {} echoes",
         options.seed,
         frame.whales.len(),
         distances.join(", "),
-        frame.creatures.len(),
+        frame.visits.len(),
         frame.kelp.len(),
         frame.echoes.len()
     );

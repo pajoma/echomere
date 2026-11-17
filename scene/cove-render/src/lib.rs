@@ -8,7 +8,6 @@
 #![allow(clippy::chunks_exact_to_as_chunks)]
 
 mod composite;
-mod fish;
 mod gpu;
 mod kelp;
 mod ocean;

@@ -14,11 +14,8 @@ pub(crate) struct SceneBuffer;
 impl SceneBuffer {
     /// The sky: light direction and intensity, light colour and ambient, zenith and night (1 or 0), horizon and warmth.
     pub const SKY_START: usize = 2;
-    /// The small fish, three `vec4f` each. Packed for the fish pass; the water pass does not draw them.
-    pub const CREATURE_START: usize = 14;
-    pub const ECHO_START: usize = 326;
-    pub const COUNT: usize = 336;
-    pub const MAX_CREATURES: usize = (Self::ECHO_START - Self::CREATURE_START) / 3;
+    pub const ECHO_START: usize = 14;
+    pub const COUNT: usize = 24;
     pub const MAX_ECHOES: usize = (Self::COUNT - Self::ECHO_START) / 2;
 
     /// `aspect` is width / height of the scene target, `pixels_high` its height in pixels (for
@@ -30,30 +27,17 @@ impl SceneBuffer {
         sea_from_above: bool,
     ) -> Vec<[f32; 4]> {
         let mut data = vec![[0.0f32; 4]; Self::COUNT];
-        let creatures = &frame.creatures[..frame.creatures.len().min(Self::MAX_CREATURES)];
         let echoes = &frame.echoes[..frame.echoes.len().min(Self::MAX_ECHOES)];
 
         // Shader time runs over one day; f32 keeps enough precision for slow motion at that range.
         let shader_time = frame.time % 86_400.0;
-        data[0] = [
-            aspect as f32,
-            shader_time as f32,
-            creatures.len() as f32,
-            0.0,
-        ];
+        data[0] = [aspect as f32, shader_time as f32, 0.0, 0.0];
         data[1] = [
             echoes.len() as f32,
             (1.0 / pixels_high) as f32,
             if sea_from_above { 1.0 } else { 0.0 },
             0.0,
         ];
-
-        for (i, c) in creatures.iter().enumerate() {
-            let b = Self::CREATURE_START + i * 3;
-            data[b] = [c.x as f32, c.y as f32, c.depth as f32, c.facing as f32];
-            data[b + 1] = [c.phase as f32, c.size as f32, 1.0, 0.0];
-            data[b + 2] = [c.colour as f32, 1.0, 0.0, 0.0];
-        }
 
         let sky = &frame.sky;
         let v = |a: [f64; 3], w: f64| [a[0] as f32, a[1] as f32, a[2] as f32, w as f32];
@@ -73,7 +57,7 @@ impl SceneBuffer {
 
 pub(crate) struct Water {
     pipeline: wgpu::RenderPipeline,
-    /// The scene buffer. The fish pass reads it too.
+    /// The scene buffer. Other passes may read it too.
     pub uniforms: wgpu::Buffer,
     group: wgpu::BindGroup,
 }
@@ -219,14 +203,13 @@ mod tests {
             CoveScene::new(CoveSeed(4_711)).frame(1_794_000_000.0 + 400.0 * 86_400.0, &[], &[]);
         frame.sky = cove_scene::sky::state(12.0);
         let data = SceneBuffer::pack(&frame, 1.6, 200.0, true);
-        assert_eq!(data.len(), 336);
+        assert_eq!(data.len(), 24);
         assert_eq!(data[0][1], (1_794_000_000.0f64 % 86_400.0) as f32);
         assert_eq!(data[1][1..3], [1.0 / 200.0, 1.0]);
         assert_eq!(
             data[SceneBuffer::SKY_START + 1][3],
             frame.sky.ambient as f32
         );
-        assert_eq!(SceneBuffer::MAX_CREATURES, 104);
         assert_eq!(SceneBuffer::MAX_ECHOES, 5);
     }
 }

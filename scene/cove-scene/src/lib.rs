@@ -6,6 +6,7 @@ pub mod layout;
 pub mod model;
 pub mod random;
 pub mod scene;
+pub mod schools;
 pub mod sea;
 pub mod sky;
 

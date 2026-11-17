@@ -5,29 +5,29 @@
 
 use crate::camera;
 use crate::kelp::{self, cycle, wrap_angle, KelpBlade, KelpMotion};
-use crate::layout::{CoveLayout, FishSchool};
+use crate::layout::CoveLayout;
 use crate::model::{scene_rules, CoveSeed, Echo, Visitor, WhaleLook, WhaleSpecies};
 use crate::random::{combine, stable_hash, SplitMix64};
+use crate::schools::{self, FishKind, SchoolVisit};
 use crate::sea;
 use crate::sky::{self, SkyState};
 use std::cmp::Ordering;
 use std::f64::consts::PI;
 
-/// One of the small fish of the ambient life, in picture coordinates.
+/// One fish of a school, in metres: x to the right of the camera, y up (0 is the surface), z ahead of it.
+/// `CoveScene::frame` leaves these empty; whoever simulates the schools fills them in.
 #[derive(Debug, Clone, PartialEq)]
-pub struct CreaturePose {
-    /// A stable name such as "fish-1-4".
-    pub id: String,
-    pub x: f64,
-    pub y: f64,
-    /// 0 is near the camera, 1 is far away.
-    pub depth: f64,
-    /// -1 swims left, +1 swims right; values in between are a fish turning.
-    pub facing: f64,
-    /// Tail beat, 0..2pi.
-    pub phase: f64,
+pub struct FishPose {
+    pub position: [f64; 3],
+    /// The way the fish swims (a unit vector).
+    pub heading: [f64; 3],
+    pub kind: FishKind,
+    /// Length in metres.
     pub size: f64,
-    pub colour: i64,
+    /// Tail beat, 0..2pi.
+    pub tail_phase: f64,
+    /// Metres per second.
+    pub speed: f64,
 }
 
 /// A whale in the water, in metres: x to the right of the camera, y up (0 is the surface), z ahead of it.
@@ -67,8 +67,10 @@ pub struct SceneFrame {
     /// Seconds since 1970.
     pub time: f64,
     pub whales: Vec<WhalePose>,
-    /// The small fish of the ambient life, ordered from far to near.
-    pub creatures: Vec<CreaturePose>,
+    /// The school visits under way, ordered by start.
+    pub visits: Vec<SchoolVisit>,
+    /// The fish of those visits. Empty from `CoveScene::frame`; the caller fills it in.
+    pub fish: Vec<FishPose>,
     pub kelp: Vec<KelpBlade>,
     pub kelp_motion: KelpMotion,
     pub echoes: Vec<EchoPose>,
@@ -109,16 +111,6 @@ impl CoveScene {
             .map(|v| self.whale_pose(v, t))
             .collect();
 
-        let mut creatures: Vec<CreaturePose> = self
-            .layout
-            .schools
-            .iter()
-            .enumerate()
-            .flat_map(|(i, s)| fish_poses(s, i, t))
-            .collect();
-        // Far to near: descending by (depth, id).
-        creatures.sort_by(|a, b| cmp_f(b.depth, a.depth).then_with(|| b.id.cmp(&a.id)));
-
         let mut recent: Vec<&Echo> = echoes
             .iter()
             .filter(|e| e.left_at <= at && at - e.left_at < scene_rules::ECHO_LIFETIME)
@@ -135,7 +127,8 @@ impl CoveScene {
         SceneFrame {
             time: at,
             whales,
-            creatures,
+            visits: schools::visits(self.seed, at),
+            fish: Vec::new(),
             kelp: self.layout.kelp.clone(),
             kelp_motion: kelp::motion(at),
             echoes,
@@ -222,30 +215,6 @@ impl CoveScene {
             size: echo.look.size,
         }
     }
-}
-
-fn fish_poses(school: &FishSchool, school_index: usize, t: f64) -> Vec<CreaturePose> {
-    let ax = cycle(t, school.period_x) + school.phase_x;
-    let centre_x = school.centre_x + school.amplitude_x * ax.sin();
-    let centre_y =
-        school.centre_y + school.amplitude_y * (cycle(t, school.period_y) + school.phase_y).sin();
-    let velocity_x = school.amplitude_x * (2.0 * PI / school.period_x) * ax.cos();
-    let facing = (velocity_x / 0.002).tanh();
-    school
-        .members
-        .iter()
-        .enumerate()
-        .map(|(index, m)| CreaturePose {
-            id: format!("fish-{school_index}-{index}"),
-            x: centre_x + m.offset_x + 0.008 * (t * 0.6 + m.wobble_phase).sin(),
-            y: centre_y + m.offset_y + 0.006 * (t * 0.9 + m.wobble_phase * 1.3).sin(),
-            depth: school.depth,
-            facing,
-            phase: wrap_angle(t * 2.0 * PI * 1.6 + m.wobble_phase),
-            size: school.size * m.size,
-            colour: school.tint,
-        })
-        .collect()
 }
 
 /// Where the whale or its pod goes, and when it breathes.
