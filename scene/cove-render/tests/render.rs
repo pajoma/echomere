@@ -2,7 +2,8 @@
 
 use cove_render::{Renderer, WhaleModel};
 use cove_scene::model::{CoveSeed, Echo, Visitor, WhaleLook, WhaleSpecies};
-use cove_scene::scene::{CoveScene, SceneFrame};
+use cove_scene::scene::{CoveScene, FishPose, SceneFrame};
+use cove_scene::schools::FishKind;
 use cove_scene::{kelp, sky};
 use std::path::Path;
 use std::sync::{Mutex, MutexGuard, OnceLock};
@@ -392,4 +393,177 @@ fn kelp_keeps_the_middle_free() {
             );
         }
     }
+}
+
+// ---- Fish (fish schools design, 2026-11-17)
+
+/// A point `distance` metres along the camera's view axis (40 degrees up from (0, -30, 0)).
+fn ahead_of_camera(distance: f64) -> [f64; 3] {
+    let pitch = cove_scene::model::scene_rules::CAMERA_PITCH;
+    [0.0, -30.0 + distance * pitch.sin(), distance * pitch.cos()]
+}
+
+/// `n` fish of `kind` in a loose grid around `centre`, all heading `heading`, each `size` metres long.
+fn school(
+    centre: [f64; 3],
+    heading: [f64; 3],
+    kind: FishKind,
+    n: usize,
+    size: f64,
+    spacing: f64,
+) -> Vec<FishPose> {
+    let side = (n as f64).sqrt().ceil() as usize;
+    (0..n)
+        .map(|i| {
+            let (a, b) = (
+                (i % side) as f64 - side as f64 / 2.0,
+                (i / side) as f64 - side as f64 / 2.0,
+            );
+            FishPose {
+                position: [
+                    centre[0] + a * spacing,
+                    centre[1] + b * spacing * 0.6,
+                    centre[2] + b * spacing * 0.3,
+                ],
+                heading,
+                kind,
+                size,
+                tail_phase: i as f64 * 0.7,
+                speed: 1.0,
+            }
+        })
+        .collect()
+}
+
+fn changed(a: &image::RgbaImage, b: &image::RgbaImage) -> Vec<[f64; 3]> {
+    rgb(a)
+        .into_iter()
+        .zip(rgb(b))
+        .filter(|(p, q)| (0..3).any(|i| (p[i] - q[i]).abs() > 2.0 / 255.0))
+        .map(|(p, _)| p)
+        .collect()
+}
+
+#[test]
+fn fish_are_drawn() {
+    let mut r = renderer();
+    let mut with = at_hour(12.0);
+    with.fish = school(
+        ahead_of_camera(15.0),
+        [1.0, 0.0, 0.0],
+        FishKind::Mackerel,
+        40,
+        0.35,
+        0.8,
+    );
+    let mut without = with.clone();
+    without.fish.clear();
+    let share = changed(&snapshot(&mut r, &with), &snapshot(&mut r, &without)).len() as f64
+        / (W * H) as f64;
+    assert!(
+        share >= 0.002,
+        "fish change only {:.3} % of the pixels",
+        share * 100.0
+    );
+}
+
+#[test]
+fn kelp_covers_fish_behind_it() {
+    let mut r = renderer();
+    let kelp_only = at_hour(12.0);
+    let mut water = kelp_only.clone();
+    water.kelp.clear();
+    // A wall of big fish far behind the kelp, over the whole picture.
+    let mut fish_behind = kelp_only.clone();
+    fish_behind.fish = school(
+        ahead_of_camera(45.0),
+        [1.0, 0.0, 0.0],
+        FishKind::Mackerel,
+        512,
+        4.0,
+        3.2,
+    );
+    let (k, w, f) = (
+        rgb(&snapshot(&mut r, &kelp_only)),
+        rgb(&snapshot(&mut r, &water)),
+        rgb(&snapshot(&mut r, &fish_behind)),
+    );
+    let differs = |p: &[f64; 3], q: &[f64; 3], by: f64| (0..3).any(|i| (p[i] - q[i]).abs() > by);
+    let kelp_pixels: Vec<usize> = (0..k.len())
+        .filter(|&i| differs(&k[i], &w[i], 20.0 / 255.0))
+        .collect();
+    assert!(!kelp_pixels.is_empty(), "the test frame shows kelp");
+    let fish_seen: usize = (0..k.len())
+        .filter(|&i| differs(&k[i], &f[i], 2.0 / 255.0))
+        .count();
+    assert!(
+        fish_seen > 1000,
+        "the wall of fish is in the picture ({fish_seen} pixels)"
+    );
+    let covered = kelp_pixels
+        .iter()
+        .filter(|&&i| !differs(&k[i], &f[i], 2.0 / 255.0))
+        .count();
+    assert!(
+        covered as f64 >= 0.98 * kelp_pixels.len() as f64,
+        "{covered} of {} kelp pixels unchanged by fish behind them",
+        kelp_pixels.len()
+    );
+}
+
+#[test]
+fn night_fish_are_not_red() {
+    let mut r = renderer();
+    for h in [0.0, 3.0, 22.0] {
+        let mut with = at_hour(h);
+        with.fish = school(
+            ahead_of_camera(12.0),
+            [1.0, 0.0, 0.0],
+            FishKind::Baitfish,
+            200,
+            0.6,
+            0.7,
+        );
+        let mut without = with.clone();
+        without.fish.clear();
+        let fish = changed(&snapshot(&mut r, &with), &snapshot(&mut r, &without));
+        assert!(!fish.is_empty(), "fish are drawn at {h}:00");
+        let n = fish.len() as f64;
+        let mean = fish.iter().fold([0.0; 3], |s, c| {
+            [s[0] + c[0] / n, s[1] + c[1] / n, s[2] + c[2] / n]
+        });
+        assert!(
+            mean[2] >= mean[1] && mean[1] >= mean[0],
+            "fish at {h}:00 mean rgb {mean:?}"
+        );
+    }
+}
+
+// Silver baitfish catch the light as they roll; the darker mackerel don't.
+#[test]
+fn baitfish_glint() {
+    let mut r = renderer();
+    let noon = at_hour(12.0);
+    let mut water = noon.clone();
+    water.fish.clear();
+    let w = snapshot(&mut r, &water);
+    // The brightest fish pixels: the 99.5th luma percentile of what the school changes (few fish catch the
+    // light at any moment). Big fish close by,
+    // so a narrow glint spans pixels at the test's resolution.
+    let mut brightest = |kind: FishKind| {
+        let mut f = noon.clone();
+        f.fish = school(ahead_of_camera(8.0), [1.0, 0.0, 0.0], kind, 60, 1.5, 1.2);
+        let mut l: Vec<f64> = changed(&snapshot(&mut r, &f), &w)
+            .iter()
+            .map(|c| 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2])
+            .collect();
+        assert!(!l.is_empty(), "the school is in the picture");
+        l.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        l[((l.len() - 1) as f64 * 0.995) as usize]
+    };
+    let (bait, mackerel) = (brightest(FishKind::Baitfish), brightest(FishKind::Mackerel));
+    assert!(
+        bait > mackerel + 0.03,
+        "baitfish glint {bait} vs mackerel {mackerel}"
+    );
 }

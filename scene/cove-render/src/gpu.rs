@@ -5,6 +5,7 @@ use std::fmt;
 use cove_scene::scene::SceneFrame;
 
 use crate::composite::Composite;
+use crate::fish::Fish;
 use crate::kelp::Kelp;
 use crate::ocean::{self, Ocean, SeaStatistics, CASCADES, N};
 use crate::targets::{Targets, DEFAULT_SCALE};
@@ -58,6 +59,7 @@ pub struct Renderer {
     ocean: Ocean,
     water: Water,
     kelp: Kelp,
+    fish: Fish,
     whales: Whales,
     composite: Composite,
     /// Shows the sea from 4 m above instead of the cove, for checking the waves.
@@ -104,6 +106,7 @@ impl Renderer {
         let ocean = Ocean::new(&device, &queue);
         let water = Water::new(&device, &ocean);
         let kelp = Kelp::new(&device, &queue);
+        let fish = Fish::new(&device, &queue);
         let whales = Whales::new(&device, &queue, &ocean, &whales::whales_dir())?;
         let composite = Composite::new(&device);
         Ok(Renderer {
@@ -117,6 +120,7 @@ impl Renderer {
             ocean,
             water,
             kelp,
+            fish,
             whales,
             composite,
             sea_from_above: false,
@@ -176,7 +180,7 @@ impl Renderer {
             .simulate(&self.queue, &mut encoder, frame.sea_time);
         self.water
             .prepare(&self.queue, frame, scene_size, self.sea_from_above);
-        // The debug view of the sea from above has no kelp or whales.
+        // The debug view of the sea from above has no kelp, whales or fish.
         self.kelp.prepare(
             &self.device,
             &self.queue,
@@ -191,6 +195,8 @@ impl Renderer {
             scene_size,
             !self.sea_from_above,
         );
+        self.fish
+            .prepare(&self.queue, frame, scene_size, !self.sea_from_above);
         {
             let mut scene = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("scene"),
@@ -216,6 +222,7 @@ impl Renderer {
             self.water.draw(&mut scene);
             self.kelp.draw(&mut scene);
             self.whales.draw(&mut scene);
+            self.fish.draw(&mut scene);
         }
         self.composite
             .draw(&self.device, &mut encoder, targets, output, format);
