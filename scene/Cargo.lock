@@ -355,6 +355,13 @@ name = "cove-scene"
 version = "0.1.0"
 
 [[package]]
+name = "cove-swarm"
+version = "0.1.0"
+dependencies = [
+ "cove-scene",
+]
+
+[[package]]
 name = "crc32fast"
 version = "1.5.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"

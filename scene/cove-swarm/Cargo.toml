@@ -1,0 +1,8 @@
+[package]
+name = "cove-swarm"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+cove-scene = { path = "../cove-scene" }
