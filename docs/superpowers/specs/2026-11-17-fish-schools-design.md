@@ -115,8 +115,8 @@ Designer's calls, for the owner to check:
   `camera::project` returns x and y in 0..1; entry and exit points lie outside the picture for every
   screen shape from 9:16 to 21:9 (checked at both ends).
 - **Draw order**: the water pass (surface, shafts, echoes; full-screen, no depth write) first, then kelp,
-  whales and fish, all with depth test `Less` and depth write. Fish stay at least 2 m below the surface and
-  1 m clear of the kelp blades' paths is not required (the depth test sorts them out).
+  whales and fish, all with depth test `Less` and depth write. Fish stay at least 2 m below the surface;
+  they need not avoid the kelp, the depth test sorts out which is in front.
 - **Two schools at once**: the big and the small school can overlap in time. They are simulated together:
   social rules (orientation, attraction) apply only within a school, the repulsion zone applies to every
   fish, so the schools pass by or through each other without fish overlapping.
@@ -145,6 +145,9 @@ Simulation (`cove-swarm`, CPU):
 Schedule (`cove-scene`):
 
 - `visits_are_shared`: the same cove seed and time give the same visits; different coves differ.
+- `routes_enter_and_leave_out_of_sight`: every route's entry and exit lie outside the picture at 9:16 and 21:9.
+- `school_starts_mid_visit`: a school spawned in the middle of a visit is formed (polarisation above 0.8)
+  and near the route's lead point after its warm-up.
 - `big_school_visits_every_few_minutes` and `small_school_visits_more_often`: gaps and durations within the
   ranges above, over a simulated day.
 
