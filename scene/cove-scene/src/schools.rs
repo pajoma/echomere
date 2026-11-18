@@ -263,7 +263,7 @@ fn visit_in_slot(seed: CoveSeed, kind: FishKind, slot: i64) -> SchoolVisit {
     // Some big-school visits circle: at one stop the lead lingers 40 to 70 s and the school mills around it.
     let circles = kind == FishKind::Baitfish && random.unit() < 0.4;
     let radius = random.range(6.0, 8.0);
-    // Roaming close to the camera: stops around a centre 6 to 9 m ahead and 4 to 10 m above the camera,
+    // Roaming close to the camera: stops around a centre 6 to 9 m ahead on the view axis,
     // up to 14 m to either side (past the picture's edges), 3 m up or down and nearer or farther; each 4 to
     // 14 m from the last, reached at about LEAD_SPEED / 1.6 (eased, so never faster than LEAD_SPEED), with
     // 4 to 12 s of lingering.
@@ -271,7 +271,13 @@ fn visit_in_slot(seed: CoveSeed, kind: FishKind, slot: i64) -> SchoolVisit {
         FishKind::Baitfish => random.range(70.0, 140.0),
         FishKind::Mackerel => random.range(60.0, 110.0),
     };
-    let roam_centre = point(random.range(6.0, 9.0), random.range(20.0, 26.0), 0.0);
+    // The centre lies on the camera's view axis, so the school roams around the middle of the picture.
+    let roam_ahead = random.range(6.0, 9.0);
+    let roam_centre = point(
+        roam_ahead,
+        scene_rules::CAMERA_DEPTH - roam_ahead * scene_rules::CAMERA_PITCH.sin(),
+        0.0,
+    );
     // The stop where a circling school mills: the third.
     const CIRCLING_STOP: usize = 2;
     let mut stops: Vec<Stop> = Vec::new();

@@ -93,7 +93,7 @@ Designer's calls, for the owner to check:
   preferred direction leads the school from its entry point, roaming around the camera (sometimes into a circling
   phase overhead, by widening the orientation zone over time), to its exit point. Schools spawn outside the
   picture when a visit starts and are removed after they have left it. Speeds are slow (see Time step and pace).
-- **Space** (owner, 2026-11-18: closer): schools roam close to the camera, about 6–9 m ahead and 4–10 m above it,
+- **Space** (owner, 2026-11-18: closer): schools roam close to the camera, about 6–9 m ahead on its view axis,
   wandering up to 14 m to either side, so they leave the picture and come back; between
   the camera depth and a few metres below the surface. They avoid a sphere around the camera and, once
   whales are back, a capsule around each whale.
