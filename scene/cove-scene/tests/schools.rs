@@ -117,7 +117,7 @@ fn lead_moves_smoothly() {
             assert!(step <= 1.5 * LEAD_SPEED, "step {step} m/s");
             assert!(a[1] <= -2.0, "{} m deep", -a[1]);
             let camera = (a[0].powi(2) + (a[1] + 30.0).powi(2) + a[2].powi(2)).sqrt();
-            assert!(camera >= 10.0, "{camera} m from the camera");
+            assert!(camera >= 3.0, "{camera} m from the camera");
             t += 1.0;
         }
     }

@@ -75,6 +75,52 @@ pub struct SchoolVisit {
     pub entry: [f64; 3],
     pub exit: [f64; 3],
     pub circling: Option<Circling>,
+    /// A time of roaming around the camera, for visits that don't circle: the school swims in and out of
+    /// the picture before it leaves the cove (owner, 2026-11-17).
+    pub roaming: Option<Roaming>,
+}
+
+/// The lead point roaming around the camera from stop to stop, lingering at each: the school wanders in and
+/// out of the picture on an erratic path and mills where the lead lingers (owner, 2026-11-18: "it should
+/// linger a bit").
+#[derive(Debug, Clone, PartialEq)]
+pub struct Roaming {
+    pub start: f64,
+    pub end: f64,
+    pub stops: Vec<Stop>,
+}
+
+/// One stop of a roaming lead: where, how long it takes to get there from the stop before (or, for the
+/// first, from where the roaming starts), and how long the lead lingers there.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Stop {
+    pub at: [f64; 3],
+    pub travel: f64,
+    pub linger: f64,
+}
+
+impl Roaming {
+    /// The lead point `time` seconds after the roaming starts: easing from stop to stop, still while it
+    /// lingers.
+    fn at(&self, time: f64) -> Vec3 {
+        let mut from = self.stops[0].at;
+        let mut t = time;
+        for (i, stop) in self.stops.iter().enumerate() {
+            if i > 0 {
+                if t < stop.travel {
+                    let f = t / stop.travel;
+                    return lerp(from, stop.at, f * f * (3.0 - 2.0 * f));
+                }
+                t -= stop.travel;
+            }
+            if t < stop.linger {
+                return stop.at;
+            }
+            t -= stop.linger;
+            from = stop.at;
+        }
+        from
+    }
 }
 
 type Vec3 = [f64; 3];
@@ -144,6 +190,20 @@ impl SchoolVisit {
     /// The route's lead point at a moment (clamped to the visit): the school follows it.
     pub fn lead(&self, at: f64) -> [f64; 3] {
         let t = at.max(self.start).min(self.end);
+        if let Some(r) = &self.roaming {
+            let first = r.at(0.0);
+            return if t <= r.start {
+                lerp(
+                    self.entry,
+                    first,
+                    (t - self.start) / (r.start - self.start).max(1e-9),
+                )
+            } else if t <= r.end {
+                r.at(t - r.start)
+            } else {
+                along(r.at(r.end - r.start), self.exit, (t - r.end) * LEAD_SPEED)
+            };
+        }
         match &self.circling {
             None => along(self.entry, self.exit, (t - self.start) * LEAD_SPEED),
             Some(c) => {
@@ -200,44 +260,83 @@ fn visit_in_slot(seed: CoveSeed, kind: FishKind, slot: i64) -> SchoolVisit {
         random.range(8.0, 24.0),
         -side * 2.2,
     );
+    // Some big-school visits circle: at one stop the lead lingers 40 to 70 s and the school mills around it.
     let circles = kind == FishKind::Baitfish && random.unit() < 0.4;
-    let circle_time = random.range(60.0, 120.0);
-    let circle_centre = point(
-        random.range(20.0, 26.0),
-        random.range(8.0, 24.0),
-        random.range(-0.1, 0.1),
-    );
     let radius = random.range(6.0, 8.0);
+    // Roaming close to the camera: stops around a centre 6 to 9 m ahead and 4 to 10 m above the camera,
+    // up to 14 m to either side (past the picture's edges), 3 m up or down and nearer or farther; each 4 to
+    // 14 m from the last, reached at about LEAD_SPEED / 1.6 (eased, so never faster than LEAD_SPEED), with
+    // 4 to 12 s of lingering.
+    let roam_time = match kind {
+        FishKind::Baitfish => random.range(70.0, 140.0),
+        FishKind::Mackerel => random.range(60.0, 110.0),
+    };
+    let roam_centre = point(random.range(6.0, 9.0), random.range(20.0, 26.0), 0.0);
+    // The stop where a circling school mills: the third.
+    const CIRCLING_STOP: usize = 2;
+    let mut stops: Vec<Stop> = Vec::new();
+    let mut total = 0.0;
+    while total < roam_time || (circles && stops.len() <= CIRCLING_STOP) {
+        let mut at = roam_centre;
+        for _ in 0..8 {
+            at = [
+                roam_centre[0] + random.range(-14.0, 14.0),
+                roam_centre[1] + random.range(-3.0, 3.0),
+                roam_centre[2] + random.range(-3.0, 3.0),
+            ];
+            let hop = stops.last().map_or(8.0, |s| length(sub(at, s.at)));
+            if (4.0..=14.0).contains(&hop) {
+                break;
+            }
+        }
+        let travel = stops
+            .last()
+            .map_or(0.0, |s| 1.6 * length(sub(at, s.at)) / LEAD_SPEED);
+        let linger = if circles && stops.len() == CIRCLING_STOP {
+            random.range(40.0, 70.0)
+        } else {
+            random.range(4.0, 12.0)
+        };
+        total += travel + linger;
+        stops.push(Stop { at, travel, linger });
+    }
 
-    let mut visit = SchoolVisit {
+    let mut roaming = Roaming {
+        start: 0.0,
+        end: 0.0,
+        stops,
+    };
+    roaming.start = start + length(sub(roaming.at(0.0), entry)) / LEAD_SPEED;
+    roaming.end = roaming.start + total;
+    let circling = circles.then(|| {
+        let before: f64 = roaming.stops[..CIRCLING_STOP]
+            .iter()
+            .map(|s| s.travel + s.linger)
+            .sum();
+        let stop = &roaming.stops[CIRCLING_STOP];
+        let begin = roaming.start + before + stop.travel;
+        Circling {
+            start: begin,
+            end: begin + stop.linger,
+            centre: stop.at,
+            radius,
+        }
+    });
+    let leave = roaming.at(total);
+    // A mackerel visit stays under about 210 s and starts at most 60 s into its 300 s slot, so it ends more
+    // than 30 s before the next slot's earliest start.
+    let end = roaming.end + (length(sub(exit, leave)) + kind.overshoot()) / LEAD_SPEED;
+    SchoolVisit {
         id,
         kind,
         count,
         start,
-        end: start,
+        end,
         entry,
         exit,
-        circling: None,
-    };
-    let overshoot = kind.overshoot();
-    if circles {
-        let mut c = Circling {
-            start: 0.0,
-            end: 0.0,
-            centre: circle_centre,
-            radius,
-        };
-        c.start = start + length(sub(c.join(entry), entry)) / LEAD_SPEED;
-        c.end = c.start + circle_time;
-        let leave = c.at(entry, circle_time);
-        visit.end = c.end + (length(sub(exit, leave)) + overshoot) / LEAD_SPEED;
-        visit.circling = Some(c);
-    } else {
-        // A mackerel visit is at most 160 s long and starts at most 60 s into its 300 s slot, so it
-        // always ends more than 30 s before the next slot's earliest start; no shortening is needed.
-        visit.end = start + (length(sub(exit, entry)) + overshoot) / LEAD_SPEED;
+        circling,
+        roaming: Some(roaming),
     }
-    visit
 }
 
 /// The visits under way at `at`, ordered by start.
@@ -271,6 +370,10 @@ pub fn forced_visit(seed: CoveSeed, kind: FishKind, at: f64) -> SchoolVisit {
     if let Some(c) = visit.circling.as_mut() {
         c.start += shift;
         c.end += shift;
+    }
+    if let Some(r) = visit.roaming.as_mut() {
+        r.start += shift;
+        r.end += shift;
     }
     visit
 }

@@ -103,7 +103,7 @@ const LEAVE_EARLY: f64 = 15.0;
 /// Fish keep this far below the surface (metres, y is up) and outside this sphere around the camera, and
 /// start to turn away a metre before.
 const SURFACE: f64 = -2.0;
-const CAMERA_CLEARANCE: f64 = 6.0;
+const CAMERA_CLEARANCE: f64 = 3.0;
 const CAMERA: Vec3 = [0.0, -30.0, 0.0];
 const MARGIN: f64 = 1.0;
 

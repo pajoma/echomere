@@ -16,7 +16,7 @@ slowed sea and kelp.
 ## Goals
 
 1. **A big school as an event (owner's choice A)**: several hundred fish that visit every few minutes, enter
-   the picture, sometimes circle overhead, then leave. Between visits the water is empty.
+   the picture, roam close to the camera, then leave. Between visits the water is empty.
 2. **One smaller school, more regularly (owner)**: about 30–60 fish, looser and quieter, in the picture more
    often and for longer.
 3. **Real schooling behaviour**: each screen simulates its schools with the Couzin zone model (Couzin et al.
@@ -27,8 +27,9 @@ slowed sea and kelp.
 4. **Fish with swimming bodies**: 3D fish, one procedural mesh per fish type drawn as instances, with a body
    wave in the vertex shader (the well-known sine-wave swim technique, as in ABZU's fish; Echomere's own
    code).
-5. **Lit by the water model** like everything else, with a silver glint when a baitfish's flank turns
-   towards the light, so a turning wave shows as a ripple of light. Warmth at sunrise and sunset applies.
+5. **Lit by the water model** like everything else; baitfish flanks reflect the light as they roll.
+   Warmth at sunrise and sunset applies. (The first draft made a "silver cloud" the big school's look; that
+   was the designer's idea, not the owner's, and is dropped: the goal is realistic behaviour.)
 6. **Depth-correct**: fish are drawn with depth test, so the kelp frame covers fish behind it.
 
 ## Non-goals
@@ -89,10 +90,11 @@ Designer's calls, for the owner to check:
   have made the small school overlap itself.) Visits never depend on the frame before.
 - **Simulation (per screen)**: a new crate `cove-swarm` (pure Rust, no GPU, stateful): Couzin zones with a
   blind angle and a maximum turning rate, a fixed time step with sub-steps, and a few informed fish whose
-  preferred direction leads the school from its entry point, across the picture (sometimes into a circling
+  preferred direction leads the school from its entry point, roaming around the camera (sometimes into a circling
   phase overhead, by widening the orientation zone over time), to its exit point. Schools spawn outside the
   picture when a visit starts and are removed after they have left it. Speeds are slow (see Time step and pace).
-- **Space**: schools swim in the middle distance, behind the kelp frame (about 10–40 m from the camera), between
+- **Space** (owner, 2026-11-18: closer): schools roam close to the camera, about 6–9 m ahead and 4–10 m above it,
+  wandering up to 14 m to either side, so they leave the picture and come back; between
   the camera depth and a few metres below the surface. They avoid a sphere around the camera and, once
   whales are back, a capsule around each whale.
 - **Rendering**: the full-screen fish pass is replaced by an instanced, depth-tested pass in `cove-render`,
@@ -100,8 +102,10 @@ Designer's calls, for the owner to check:
   with a body wave whose speed follows the fish's swimming speed; the fragment uses the water model, a
   silver glint for baitfish, and `through_water`.
 - **Shared route, local swimming**: each visit carries a route that is a pure function of time: a lead point
-  moving from the entry point, across the picture, to the exit point, with an optional circling window
-  (start, end, centre, radius) during which it circles overhead. Every screen's informed fish steer towards
+  moving from the entry point to a roaming phase and then to the exit point. While roaming (owner,
+  2026-11-18: "it should linger a bit (more erratic paths)") the lead moves from stop to stop, 4–14 m apart,
+  eased, and lingers 4–12 s at each; in circling visits it lingers 40–70 s at one stop while the school mills
+  around it (the circling window). Every screen's informed fish steer towards
   this lead point, so the school is roughly in the same place on every screen while its shape and the
   individual fish differ (ADR 0009).
 - **Starting mid-visit**: when a screen starts, wakes or is asked for an arbitrary moment (`--at`,
