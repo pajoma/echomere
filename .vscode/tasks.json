@@ -1,0 +1,80 @@
+{
+  // Echomere cove scene. Every "run" task first runs "scene: build preview": cargo only recompiles what
+  // changed, so an up-to-date build returns in seconds and an old one is rebuilt before the scene starts.
+  "version": "2.0.0",
+  "options": {
+    "cwd": "${workspaceFolder}/scene",
+    "env": {
+      "PATH": "${env:HOME}/.cargo/bin:${env:PATH}"
+    }
+  },
+  "tasks": [
+    {
+      "label": "scene: build preview",
+      "type": "shell",
+      "command": "cargo",
+      "args": ["build", "--release", "-p", "scene-preview"],
+      "group": { "kind": "build", "isDefault": true },
+      "problemMatcher": ["$rustc"],
+      "presentation": { "reveal": "silent", "panel": "shared", "clear": true }
+    },
+    {
+      "label": "scene: run preview",
+      "detail": "The cove as it is now (real time of day)",
+      "type": "shell",
+      "command": "./target/release/scene-preview",
+      "dependsOn": "scene: build preview",
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "dedicated" }
+    },
+    {
+      "label": "scene: run preview at an hour",
+      "detail": "The cove at a chosen hour of the day",
+      "type": "shell",
+      "command": "./target/release/scene-preview",
+      "args": ["--hour", "${input:hour}"],
+      "dependsOn": "scene: build preview",
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "dedicated" }
+    },
+    {
+      "label": "scene: run preview, a day in two minutes",
+      "detail": "Sunrise, noon, sunset and night in 120 s, starting at 5:00",
+      "type": "shell",
+      "command": "./target/release/scene-preview",
+      "args": ["--day-seconds", "120"],
+      "dependsOn": "scene: build preview",
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "dedicated" }
+    },
+    {
+      "label": "scene: run preview with the small school",
+      "detail": "Noon, with the visiting school brought in now",
+      "type": "shell",
+      "command": "./target/release/scene-preview",
+      "args": ["--hour", "12", "--school", "small"],
+      "dependsOn": "scene: build preview",
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "dedicated" }
+    },
+    {
+      "label": "scene: test",
+      "detail": "All checks (slow without a GPU)",
+      "type": "shell",
+      "command": "cargo",
+      "args": ["test", "--workspace", "--no-fail-fast", "--", "--test-threads=1"],
+      "group": "test",
+      "problemMatcher": ["$rustc"],
+      "presentation": { "reveal": "always", "panel": "dedicated" }
+    }
+  ],
+  "inputs": [
+    {
+      "id": "hour",
+      "type": "pickString",
+      "description": "Hour of the day",
+      "options": ["6", "7", "9", "12", "15", "17", "18", "21", "0"],
+      "default": "12"
+    }
+  ]
+}

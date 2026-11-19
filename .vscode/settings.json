@@ -1,0 +1,4 @@
+{
+  // The Rust workspace lives in scene/, not at the repository root.
+  "rust-analyzer.linkedProjects": ["scene/Cargo.toml"]
+}
