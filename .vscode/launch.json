@@ -1,33 +1,29 @@
 {
-  // Start the cove scene with F5 (Run and Debug). The pre-launch task builds it first if anything changed.
-  // Needs the CodeLLDB extension (vadimcn.vscode-lldb); without it, use Terminal > Run Task > "scene: run
-  // preview".
+  // Start the cove scene with F5 (Run and Debug). The pre-launch task builds it first if anything changed;
+  // "node-terminal" is built into VS Code and just runs the command in a terminal, so no extension is needed.
   "version": "0.2.0",
   "configurations": [
     {
       "name": "Cove scene",
-      "type": "lldb",
+      "type": "node-terminal",
       "request": "launch",
-      "program": "${workspaceFolder}/scene/target/release/scene-preview",
-      "args": [],
+      "command": "./target/release/scene-preview",
       "cwd": "${workspaceFolder}/scene",
       "preLaunchTask": "scene: build preview"
     },
     {
       "name": "Cove scene at noon, with the small school",
-      "type": "lldb",
+      "type": "node-terminal",
       "request": "launch",
-      "program": "${workspaceFolder}/scene/target/release/scene-preview",
-      "args": ["--hour", "12", "--school", "small"],
+      "command": "./target/release/scene-preview --hour 12 --school small",
       "cwd": "${workspaceFolder}/scene",
       "preLaunchTask": "scene: build preview"
     },
     {
       "name": "Cove scene, a day in two minutes",
-      "type": "lldb",
+      "type": "node-terminal",
       "request": "launch",
-      "program": "${workspaceFolder}/scene/target/release/scene-preview",
-      "args": ["--day-seconds", "120"],
+      "command": "./target/release/scene-preview --day-seconds 120",
       "cwd": "${workspaceFolder}/scene",
       "preLaunchTask": "scene: build preview"
     }
