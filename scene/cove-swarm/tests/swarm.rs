@@ -326,3 +326,25 @@ fn simulation_fits_the_budget() {
     println!("{each:.3} ms a frame");
     assert!(each < 2.0, "{each} ms a frame");
 }
+
+// A slow screen (2 to 4 frames a second on a software renderer) must not restart the school every frame:
+// the owner saw the small school jump in the live preview (2026-11-19). Over a 0.5 s gap every fish keeps
+// swimming from where it was.
+#[test]
+fn slow_frames_do_not_restart_the_school() {
+    let visit = crossing(1, FishKind::Mackerel, 40, 0.0, -1.0);
+    let mut swarm = Swarm::new(3);
+    let mut at = 30.0;
+    swarm.advance(std::slice::from_ref(&visit), at);
+    for _ in 0..20 {
+        let before = swarm.poses();
+        at += 0.5;
+        swarm.advance(std::slice::from_ref(&visit), at);
+        let after = swarm.poses();
+        assert_eq!(before.len(), after.len());
+        for (a, b) in before.iter().zip(&after) {
+            let moved = distance(a.position, b.position);
+            assert!(moved <= 0.5 * 2.5, "a fish jumped {moved} m in 0.5 s");
+        }
+    }
+}

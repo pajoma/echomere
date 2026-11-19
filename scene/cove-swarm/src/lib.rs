@@ -42,7 +42,7 @@ const FAR: f64 = 1.0e6;
 /// The fixed integration step, in seconds.
 const STEP: f64 = 1.0 / 30.0;
 /// A pause longer than this between two calls (sleep, a jump to another moment) restarts the schools.
-const GAP: f64 = 0.25;
+const GAP: f64 = 2.0;
 /// How long a restarted school swims before it is shown, in seconds.
 const WARM_UP: f64 = 3.0;
 /// A restarted school starts this far apart (in body lengths), its headings scattered by this much
@@ -51,7 +51,7 @@ const SPAWN_SPACING: f64 = 1.5;
 const SPAWN_SCATTER: f64 = 0.05;
 
 /// Zone radii in body lengths (Couzin's r_r, r_o and r_a).
-const REPULSION: f64 = 2.0;
+const REPULSION: f64 = 1.0;
 const ORIENTATION: f64 = 12.0;
 const ATTRACTION: f64 = 15.0;
 /// The zone of orientation of a milling school: too narrow to hold a parallel group together.
@@ -64,7 +64,7 @@ const TURN_RATE: f64 = 3.0;
 const ESCAPE_TURN_RATE: f64 = 10.0;
 /// No two fish end a step closer than this share of the larger one's body length, after at most this many
 /// passes of moving them apart (a pass can push a fish into a third).
-const CLOSEST: f64 = 1.0;
+const CLOSEST: f64 = 0.6;
 const SEPARATION_PASSES: usize = 4;
 /// The standard deviation of the angular noise, in radians per step.
 const NOISE: f64 = 0.03;
