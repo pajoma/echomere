@@ -26,8 +26,8 @@ use cove_render::Renderer;
 use cove_scene::model::{scene_rules, CoveSeed, Echo, Visitor};
 use cove_scene::scene::{CoveScene, SceneFrame};
 use cove_scene::schools::{self, FishKind, SchoolVisit};
-use cove_swarm::Swarm;
 use cove_scene::sky::{self, SkyState};
+use cove_swarm::Swarm;
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, KeyEvent, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
@@ -82,16 +82,18 @@ struct Options {
     /// Prints the frame rate and the GPU time per frame (from timestamp queries, when the adapter has them).
     #[arg(long)]
     stats: bool,
-    /// Brings a school by now: `big` (baitfish) or `small` (mackerel), for snapshots, clips and tuning.
+    /// Brings the visiting school by now: `small` (mackerel), for snapshots, clips and tuning. The big school
+    /// lives in the cove and is always there.
     #[arg(long, value_parser = parse_school)]
     school: Option<FishKind>,
 }
 
 fn parse_school(value: &str) -> Result<FishKind, String> {
     match value {
-        "big" => Ok(FishKind::Baitfish),
         "small" => Ok(FishKind::Mackerel),
-        _ => Err(format!("`{value}` is not a school: use big or small")),
+        _ => Err(format!(
+            "`{value}` is not a school that visits: use small (the big school is always there)"
+        )),
     }
 }
 

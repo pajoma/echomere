@@ -46,6 +46,7 @@ fn crossing(id: u64, kind: FishKind, count: usize, start: f64, side: f64) -> Sch
         exit,
         circling: None,
         roaming: None,
+        wander: None,
     }
 }
 

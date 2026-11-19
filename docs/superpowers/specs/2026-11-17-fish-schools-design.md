@@ -13,6 +13,16 @@ through the school as a wave, a school that changes its shape (swimming in paral
 cloud), splitting around something and closing up again, fish whose bodies swim. Calm, in keeping with the
 slowed sea and kelp.
 
+## Owner's revision (2026-11-19): the big school lives in the cove
+
+The big school no longer visits: it is always in the cove and always moving. About 20 % of the time it is
+far away (40–50 m, nearly invisible), 60 % in the middle distance (15–35 m, a cloud), 20 % close by (6–10 m,
+clearly a school of fish). Within every hour its route passes through every part of the picture (a
+screensaver). Its route (`schools::wander`) eases between picture targets every 150 s (each hour runs through
+a shuffled 3 × 3 grid of cells) and distance targets every 150 s, shared by every screen; its id is the same
+every day, so the swarm never respawns it. The small school still visits. Where this section and the goals
+below disagree, this section holds.
+
 ## Goals
 
 1. **A big school as an event (owner's choice A)**: several hundred fish that visit every few minutes, enter

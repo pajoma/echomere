@@ -4,13 +4,14 @@ use cove_scene::schools::{self, visits, FishKind, SchoolVisit, LEAD_SPEED};
 
 const DAY_START: f64 = 1_794_000_000.0 - (1_794_000_000.0 % 86_400.0);
 
-/// Every visit that starts within a day (found by walking the day in steps no longer than a visit).
+/// Every scheduled visit (not the resident school) that starts within a day (found by walking the day in steps no longer than a visit).
 fn day_of_visits(seed: CoveSeed) -> Vec<SchoolVisit> {
     let mut all: Vec<SchoolVisit> = Vec::new();
     let mut t = DAY_START;
     while t < DAY_START + 86_400.0 {
         for v in visits(seed, t) {
-            if v.start >= DAY_START
+            if v.wander.is_none()
+                && v.start >= DAY_START
                 && v.start < DAY_START + 86_400.0
                 && !all.iter().any(|o| o.id == v.id)
             {
@@ -53,22 +54,74 @@ fn visits_under_way_are_listed_by_start() {
     }
 }
 
+// The resident big school (owner, 2026-11-19).
+fn resident(seed: u64, at: f64) -> SchoolVisit {
+    let big: Vec<SchoolVisit> = visits(CoveSeed(seed), at)
+        .into_iter()
+        .filter(|v| v.kind == FishKind::Baitfish)
+        .collect();
+    assert_eq!(big.len(), 1, "one big school at {at}");
+    big[0].clone()
+}
+
 #[test]
-fn big_school_visits_every_few_minutes() {
-    let all = day_of_visits(CoveSeed(5));
-    let big = of_kind(&all, FishKind::Baitfish);
-    assert!(big.len() > 100);
-    for w in big.windows(2) {
-        let gap = w[1].start - w[0].start;
-        assert!((315.0..=585.0).contains(&gap), "gap {gap}");
+fn big_school_is_always_there() {
+    let first = resident(5, DAY_START);
+    assert!((300..=400).contains(&first.count) && first.wander.is_some());
+    for i in 0..200 {
+        let v = resident(5, DAY_START + i as f64 * 977.0);
+        assert_eq!(v.id, first.id, "the same school every day");
     }
-    for v in &big {
-        let d = v.end - v.start;
-        assert!((60.0..=300.0).contains(&d), "duration {d}");
-        assert!((300..=400).contains(&v.count));
+}
+
+#[test]
+fn big_school_is_mostly_in_the_middle_distance() {
+    let v = resident(5, DAY_START);
+    let (mut far, mut near, mut n) = (0.0, 0.0, 0.0);
+    let mut t = DAY_START;
+    while t < DAY_START + 10.0 * 86_400.0 {
+        let ahead = camera::ahead(v.lead(t));
+        if ahead >= 38.0 {
+            far += 1.0;
+        } else if ahead <= 12.0 {
+            near += 1.0;
+        }
+        n += 1.0;
+        t += 10.0;
     }
-    let circling = big.iter().filter(|v| v.circling.is_some()).count() as f64 / big.len() as f64;
-    assert!((0.3..=0.7).contains(&circling), "{circling} circle");
+    let (far, near) = (far / n, near / n);
+    println!("far {far:.2}, near {near:.2}");
+    assert!((0.1..=0.3).contains(&far) && (0.1..=0.3).contains(&near));
+}
+
+#[test]
+fn big_school_visits_the_whole_picture_every_hour() {
+    let v = resident(5, DAY_START);
+    for hour in 0..6 {
+        let mut cells = [false; 9];
+        for s in 0..720 {
+            let t = DAY_START + hour as f64 * 3_600.0 + s as f64 * 5.0;
+            if let Some((x, y, _)) = camera::project(v.lead(t), 1.6) {
+                if (0.0..1.0).contains(&x) && (0.0..1.0).contains(&y) {
+                    cells[(x * 3.0) as usize + 3 * (y * 3.0) as usize] = true;
+                }
+            }
+        }
+        // The top row far away lies above the surface, where the lead may not go; the other cells all count.
+        assert!(cells[..6].iter().all(|&c| c), "hour {hour}: {cells:?}");
+    }
+}
+
+#[test]
+fn big_school_is_always_moving_slowly() {
+    let v = resident(5, DAY_START);
+    for s in 0..20_000 {
+        let t = DAY_START + s as f64;
+        let (a, b) = (v.lead(t), v.lead(t + 1.0));
+        let step = ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2) + (a[2] - b[2]).powi(2)).sqrt();
+        assert!(step <= 1.0, "{step} m/s at {t}");
+        assert!(a[1] <= -3.0);
+    }
 }
 
 #[test]
@@ -84,12 +137,9 @@ fn small_school_visits_more_often() {
         assert!((30..=60).contains(&v.count));
         assert!(v.circling.is_none());
     }
-    let (s, b) = (
-        share_in_water(&small),
-        share_in_water(&of_kind(&all, FishKind::Baitfish)),
-    );
-    println!("small {s:.2}, big {b:.2} of the day");
-    assert!(s > b);
+    let s = share_in_water(&small);
+    println!("small school in the water {s:.2} of the day");
+    assert!((0.3..=0.8).contains(&s));
 }
 
 #[test]

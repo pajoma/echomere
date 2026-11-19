@@ -78,6 +78,9 @@ pub struct SchoolVisit {
     /// A time of roaming around the camera, for visits that don't circle: the school swims in and out of
     /// the picture before it leaves the cove (owner, 2026-11-17).
     pub roaming: Option<Roaming>,
+    /// For the resident big school: the seed of its endless wander around the cove (see `wander`). Its
+    /// `start` and `end` then only span the day it is asked for; its `id` is the same every day.
+    pub wander: Option<u64>,
 }
 
 /// The lead point roaming around the camera from stop to stop, lingering at each: the school wanders in and
@@ -189,6 +192,9 @@ impl Circling {
 impl SchoolVisit {
     /// The route's lead point at a moment (clamped to the visit): the school follows it.
     pub fn lead(&self, at: f64) -> [f64; 3] {
+        if let Some(seed) = self.wander {
+            return wander(seed, at);
+        }
         let t = at.max(self.start).min(self.end);
         if let Some(r) = &self.roaming {
             let first = r.at(0.0);
@@ -269,7 +275,7 @@ fn visit_in_slot(seed: CoveSeed, kind: FishKind, slot: i64) -> SchoolVisit {
     // 4 to 12 s of lingering.
     let roam_time = match kind {
         FishKind::Baitfish => random.range(70.0, 140.0),
-        FishKind::Mackerel => random.range(60.0, 110.0),
+        FishKind::Mackerel => random.range(40.0, 80.0),
     };
     // The centre lies on the camera's view axis, so the school roams around the middle of the picture.
     let roam_ahead = random.range(6.0, 9.0);
@@ -342,13 +348,15 @@ fn visit_in_slot(seed: CoveSeed, kind: FishKind, slot: i64) -> SchoolVisit {
         exit,
         circling,
         roaming: Some(roaming),
+        wander: None,
     }
 }
 
 /// The visits under way at `at`, ordered by start.
 pub fn visits(seed: CoveSeed, at: f64) -> Vec<SchoolVisit> {
     let mut found = Vec::new();
-    for kind in [FishKind::Baitfish, FishKind::Mackerel] {
+    found.push(resident_school(seed, at));
+    for kind in [FishKind::Mackerel] {
         let slot = (at / kind.slot()).floor() as i64;
         for s in [slot - 1, slot] {
             let v = visit_in_slot(seed, kind, s);
@@ -382,4 +390,96 @@ pub fn forced_visit(seed: CoveSeed, kind: FishKind, at: f64) -> SchoolVisit {
         r.end += shift;
     }
     visit
+}
+
+// The resident big school (owner, 2026-11-19): always in the cove and always moving. About a fifth of the
+// time it is far away (barely visible), three fifths in the middle distance (a cloud), a fifth close by
+// (clearly a school of fish); within every hour its route passes through every ninth of the picture, so a
+// screensaver never shows it in one place for long.
+
+/// Seconds between the wander's picture targets, and between its distance targets.
+const WANDER_PLACE: f64 = 150.0;
+const WANDER_DISTANCE: f64 = 150.0;
+/// Picture targets per hour: each hour visits every cell of a 3 x 3 grid at least twice.
+const PLACES_PER_HOUR: i64 = 24;
+/// The lead stays this far below the surface.
+const WANDER_SURFACE: f64 = -3.0;
+
+/// The resident big school as a visit under way at `at`: the same id every day, spanning `at`'s day.
+pub fn resident_school(seed: CoveSeed, at: f64) -> SchoolVisit {
+    let id = combine(seed.0, FishKind::Baitfish.code());
+    let day = (at / 86_400.0).floor() * 86_400.0;
+    let count = SplitMix64::new(id).int(300, 400) as usize;
+    let here = wander(id, at);
+    SchoolVisit {
+        id,
+        kind: FishKind::Baitfish,
+        count,
+        start: day,
+        end: day + 86_400.0,
+        entry: here,
+        exit: here,
+        circling: None,
+        roaming: None,
+        wander: Some(id),
+    }
+}
+
+/// Smooth easing from one target to the next.
+fn ease(f: f64) -> f64 {
+    f * f * (3.0 - 2.0 * f)
+}
+
+/// Where the resident school's lead is at `at`: a picture point and a distance along the view axis, each
+/// easing from one target to the next without stopping, turned back into the water (at 16:10).
+pub fn wander(seed: u64, at: f64) -> [f64; 3] {
+    // The picture point: targets every WANDER_PLACE seconds, each in a cell of a 3 x 3 grid; every hour
+    // runs through a fresh order of the cells.
+    let place = |k: i64| -> (f64, f64) {
+        let hour = k.div_euclid(PLACES_PER_HOUR);
+        let mut order: Vec<usize> = (0..9).collect();
+        let mut shuffle = SplitMix64::new(combine(combine(seed, 0x706c), hour as u64));
+        for i in (1..9).rev() {
+            order.swap(i, shuffle.int(0, i as i64) as usize);
+        }
+        let cell = order[k.rem_euclid(PLACES_PER_HOUR) as usize % 9];
+        let mut r = SplitMix64::new(combine(combine(seed, 0x7063), k as u64));
+        (
+            ((cell % 3) as f64 + r.unit()) / 3.0,
+            ((cell / 3) as f64 + r.unit()) / 3.0,
+        )
+    };
+    let k = (at / WANDER_PLACE).floor() as i64;
+    let f = ease(at / WANDER_PLACE - k as f64);
+    let (a, b) = (place(k), place(k + 1));
+    let (px, py) = (a.0 + (b.0 - a.0) * f, a.1 + (b.1 - a.1) * f);
+
+    // The distance: a target every WANDER_DISTANCE seconds, far (40-50 m) a fifth of the time, middle
+    // (15-35 m) three fifths, near (6-10 m) a fifth.
+    let distance = |k: i64| -> f64 {
+        let mut r = SplitMix64::new(combine(combine(seed, 0x6469), k as u64));
+        let band = r.unit();
+        if band < 0.2 {
+            r.range(40.0, 50.0)
+        } else if band < 0.8 {
+            r.range(15.0, 35.0)
+        } else {
+            r.range(6.0, 10.0)
+        }
+    };
+    let j = (at / WANDER_DISTANCE).floor() as i64;
+    let g = ease(at / WANDER_DISTANCE - j as f64);
+    let ahead = distance(j) + (distance(j + 1) - distance(j)) * g;
+
+    // Back from the picture into the water (the inverse of `camera::project` at 16:10).
+    let (cp, sp) = (
+        scene_rules::CAMERA_PITCH.cos(),
+        scene_rules::CAMERA_PITCH.sin(),
+    );
+    let focal = scene_rules::CAMERA_FOCAL;
+    let dx = (px - 0.5) * ahead * 1.6 / focal;
+    let up = (py - 0.5) * ahead / focal;
+    let dy = up * cp + ahead * sp;
+    let dz = -up * sp + ahead * cp;
+    [dx, (dy - scene_rules::CAMERA_DEPTH).min(WANDER_SURFACE), dz]
 }
